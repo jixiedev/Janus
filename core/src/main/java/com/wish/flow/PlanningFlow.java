@@ -67,6 +67,10 @@ public class PlanningFlow extends BaseFlow {
             Please only execute this current step using the appropriate tools. When you're done, provide a summary of what you accomplished.
             """;
 
+    private static final String PLAN_SECTION_HEADER = "=== Plan ===";
+    private static final String STEP_PREP_FORMAT =
+            ">>> Preparing step %d: \"%s\" (agent: %s)";
+
     private final PlanTool planTool;
     private final ToolCallingManager toolCallingManager;
 
@@ -137,20 +141,28 @@ public class PlanningFlow extends BaseFlow {
                 context.setupExecutors(new LinkedHashSet<>(getAgents().values()));
             }
 
+            String planId = context.getPlanId();
             if (input != null && !input.isBlank()) {
                 createInitialPlan(context, input);
-                if (!planTool.hasPlan(context.getPlanId())) {
-                    log.error("Plan creation failed. Plan ID {} not found.", context.getPlanId());
+                if (!planTool.hasPlan(planId)) {
+                    log.error("Plan creation failed. Plan ID {} not found.", planId);
                     return "Failed to create plan for: " + input;
                 }
                 context.initializePlan();
             }
 
             StringBuilder result = new StringBuilder();
+            if (planTool.hasPlan(planId)) {
+                appendPlanSection(result, planId);
+            }
+
             while (true) {
-                Pair<Integer, Map<String, String>> stepInfo = getCurrentStepInfo(context.getPlanId());
+                Pair<Integer, Map<String, String>> stepInfo = getCurrentStepInfo(planId);
                 int stepIndex = stepInfo.getLeft();
                 if (stepIndex < 0) {
+                    if (planTool.hasPlan(planId)) {
+                        appendPlanSection(result, planId);
+                    }
                     result.append(finalizePlan(context));
                     break;
                 }
@@ -160,8 +172,12 @@ public class PlanningFlow extends BaseFlow {
                 BaseAgent executor = getExecutor(stepType);
                 BaseUserContext executorContext = requireExecutorContext(context, executor);
 
+                appendStepPreparation(result, stepIndex, info, executor);
+                appendPlanSection(result, planId);
+
                 String stepResult = executeStep(context, executor, executorContext, stepIndex, info);
                 result.append(stepResult).append('\n');
+                appendPlanSection(result, planId);
 
                 if (executor.getAgentState() == AgentState.FINISHED) {
                     log.info("Executor {} finished early; stopping plan loop", executor.getName());
@@ -317,6 +333,37 @@ public class PlanningFlow extends BaseFlow {
         }
         throw new IllegalArgumentException(
                 "Expected PlanningFlowUserContext but got " + baseFlowUserContext.getClass().getName());
+    }
+
+    private void appendPlanSection(StringBuilder result, String planId) {
+        String section = formatPlanSection(planId);
+        log.info("Plan status ({}):\n{}", planId, section);
+        result.append(section).append("\n\n");
+    }
+
+    private String formatPlanSection(String planId) {
+        if (!planTool.hasPlan(planId)) {
+            return PLAN_SECTION_HEADER + "\nPlan not found: " + planId;
+        }
+        return PLAN_SECTION_HEADER + "\n" + planTool.getPlan(planId).format();
+    }
+
+    private void appendStepPreparation(
+            StringBuilder result, int stepIndex, Map<String, String> stepInfo, BaseAgent executor) {
+        String stepText = stepInfo.getOrDefault("text", "Step " + stepIndex);
+        String agentKey = resolveExecutorKey(executor);
+        String line = STEP_PREP_FORMAT.formatted(stepIndex, stepText, agentKey);
+        log.info(line);
+        result.append(line).append('\n');
+    }
+
+    private String resolveExecutorKey(BaseAgent executor) {
+        for (Map.Entry<String, BaseAgent> entry : getAgents().entrySet()) {
+            if (entry.getValue() == executor) {
+                return entry.getKey();
+            }
+        }
+        return executor.getName() != null ? executor.getName() : "unknown";
     }
 
 }
