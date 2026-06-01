@@ -29,3 +29,5 @@
 1779937817082:janus request -p "帮我查一下阿里巴巴的成立过程" -c 123
 1779937843322:janus request -p "我刚刚问的是哪家公司" -c 123
 1779956181351:swe request -p "帮我review一下/Users/jixie/sbox/Janus/core/src/main/java/com/wish/llm/LLMChatClient.java的代码是否符合spring最佳实践"
+1780298773418:plan request --prompt "帮我创建一个python脚本，脚本实现时间戳计算，输入格式yyyyMMdd，输入这个时间点的unix时间戳"
+1780299328199:plan request --prompt "帮我创建一个python脚本，脚本实现指数计算，比如输入2 3，输出8"
