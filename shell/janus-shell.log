@@ -31,3 +31,14 @@
 1779956181351:swe request -p "帮我review一下/Users/jixie/sbox/Janus/core/src/main/java/com/wish/llm/LLMChatClient.java的代码是否符合spring最佳实践"
 1780298773418:plan request --prompt "帮我创建一个python脚本，脚本实现时间戳计算，输入格式yyyyMMdd，输入这个时间点的unix时间戳"
 1780299328199:plan request --prompt "帮我创建一个python脚本，脚本实现指数计算，比如输入2 3，输出8"
+1780364955541:janus request "当前支持哪些mcp tools，他们的作用是什么"
+1780364964278:janus request -p "当前支持哪些mcp tools，他们的作用是什么"
+1780367630665:janus request -p "当前支持哪些mcp tools，他们的作用是什么" -c 123
+1780367728382:janus request -p "通过airflow mcp查看DailyCnMongoDataSync dag卡在哪里，怎么优化" -c 123
+1780367972800:janus request -p "检查日志查看task失败的原因" -c 123
+1780368250515:plan request -p "通过airflow mcp查看DailyCnMongoDataSync dag卡在哪里，怎么优化" -c 123
+1780369904742:plan request -p "结论是什么呢" -c 123
+1780370008531:janus request -p "通过airflow mcp查看DailyCnMongoDataSync dag卡在哪里，怎么优化" -c 123
+1780370395808:janus request -p "最近一次运行卡在哪个人物" -c 123
+1780370910600:plan request -p "通过datahub mcp查看wishpost_order_clean_full_cycle表的信息" -c 123
+1780370982856:plan request -p "这个表的上下游是什么" -c 123

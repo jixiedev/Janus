@@ -26,7 +26,7 @@ class PlanningFlowSessionTest {
         assertEquals(3, planningMessages.size());
         assertEquals("prior request", planningMessages.get(0).getText());
         assertEquals("prior result", planningMessages.get(1).getText());
-        assertInstanceOf(SystemMessage.class, planningMessages.get(2));
+        assertInstanceOf(UserMessage.class, planningMessages.get(2));
         assertTrue(planningMessages.get(2).getText().contains("background"));
         assertEquals(2, context.getInitializeContext().getSessionHydrationMessageCount());
 

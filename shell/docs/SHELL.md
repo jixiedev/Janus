@@ -180,6 +180,17 @@ janus.agent.swe.workspace-root=workspace/swe
 
 勿提交真实 Key；可用 `application-local.properties`。
 
+### MCP（可选）
+
+编辑 `shell/src/main/resources/mcp-servers.json`（Claude Desktop 格式），在 `application.properties` 中已启用：
+
+```properties
+spring.ai.mcp.client.enabled=true
+spring.ai.mcp.client.stdio.servers-configuration=classpath:mcp-servers.json
+```
+
+填好 JSON 里的 `DATAHUB_GMS_TOKEN`、`--auth-token` 等字段后重启 Shell；启动日志应出现 `Loaded N MCP tool(s)`。关闭 MCP：`spring.ai.mcp.client.enabled=false`。
+
 ---
 
 ## 常见问题

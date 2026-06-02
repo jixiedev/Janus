@@ -13,7 +13,6 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -229,7 +228,8 @@ public class PlanningFlow extends BaseFlow {
 
         String systemPrompt = buildPlanningSystemPrompt();
         BaseUserContext planningContext = context.getInitializeContext();
-        planningContext.addMemory(new SystemMessage(systemPrompt));
+        // Session hydration may already have user/assistant turns; keep one leading system message.
+        planningContext.ensureSystemPrompt(systemPrompt);
         planningContext.addMemory(new UserMessage(INITIAL_REQUEST_PROMPT_FORMAT.formatted(request, planId)));
 
         Pair<ChatResponse, Prompt> response = llmChatClient.askWithTools(planningContext, List.of(), List.of());
@@ -290,7 +290,7 @@ public class PlanningFlow extends BaseFlow {
 
         try {
             BaseUserContext planningContext = context.getFinalizeContext();
-            planningContext.addMemory(new SystemMessage(FINALIZE_PLAN_SYSTEM_PROMPT));
+            planningContext.ensureSystemPrompt(FINALIZE_PLAN_SYSTEM_PROMPT);
             planningContext.addMemory(new UserMessage(FINALIZE_PLAN_USER_PROMPT_FORMAT.formatted(planText)));
             Pair<ChatResponse, Prompt> response = llmChatClient.askWithTools(planningContext, List.of(), List.of());
             String summary = response.getKey().getResult().getOutput().getText();

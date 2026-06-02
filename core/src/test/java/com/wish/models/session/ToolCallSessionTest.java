@@ -33,7 +33,7 @@ class ToolCallSessionTest {
         assertEquals(3, second.getAllMessages().size());
         assertEquals("first task", second.getAllMessages().get(0).getText());
         assertEquals("done one", second.getAllMessages().get(1).getText());
-        assertInstanceOf(SystemMessage.class, second.getAllMessages().get(2));
+        assertInstanceOf(UserMessage.class, second.getAllMessages().get(2));
         assertTrue(second.getAllMessages().get(2).getText().contains("background"));
         assertEquals(2, second.getSessionHydrationMessageCount());
 
@@ -78,9 +78,25 @@ class ToolCallSessionTest {
         ToolCallUserContext context = session.beginPrompt("new");
         assertEquals(3, context.getAllMessages().size());
         assertEquals("prior request", context.getAllMessages().get(0).getText());
-        assertInstanceOf(SystemMessage.class, context.getAllMessages().get(2));
+        assertInstanceOf(UserMessage.class, context.getAllMessages().get(2));
         assertEquals(2, context.getSessionHydrationMessageCount());
         session.endPrompt();
+    }
+
+    @Test
+    void abortPrompt_doesNotWriteSessionMemory() {
+        var chatMemory = MessageWindowChatMemory.builder().build();
+        ToolCallSession session = new ToolCallSession("demo", chatMemory, "test summary prompt");
+
+        ToolCallUserContext context = session.beginPrompt("first");
+        context.addUserMemory("first");
+        session.abortPrompt();
+
+        assertTrue(chatMemory.get(session.getSessionMemoryKey()).isEmpty());
+
+        ToolCallUserContext second = session.beginPrompt("second");
+        assertTrue(second.getAllMessages().isEmpty());
+        session.abortPrompt();
     }
 
     @Test

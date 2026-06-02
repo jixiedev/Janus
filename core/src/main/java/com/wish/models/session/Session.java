@@ -6,6 +6,7 @@ import lombok.Getter;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -123,9 +124,29 @@ public abstract class Session<T extends Context> {
             target.addMemory(message);
             hydrated++;
         }
-        target.addMemory(new SystemMessage(SESSION_HISTORY_FRAMING_PROMPT));
+        // User role (not System) so multi-turn requests keep a single leading system message for the agent.
+        target.addMemory(new UserMessage(SESSION_HISTORY_FRAMING_PROMPT));
         target.setSessionHydrationMessageCount(hydrated);
         return hydrated;
+    }
+
+    /**
+     * Ends the current prompt without merging into session memory. Use when the agent run failed
+     * so incomplete traces are not summarized into the next {@code -c} request.
+     */
+    public synchronized void abortPrompt() {
+        if (currentContext == null) {
+            return;
+        }
+        T context = currentContext;
+        try {
+            // intentionally skip extractToSessionMemory
+        } finally {
+            clearContextMemory(context);
+            currentContext = null;
+            currentContextId = null;
+            currentPromptRequest = null;
+        }
     }
 
     protected void clearContextMemory(T context) {

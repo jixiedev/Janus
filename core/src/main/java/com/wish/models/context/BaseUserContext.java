@@ -8,6 +8,7 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -79,6 +80,30 @@ public class BaseUserContext extends Context{
 
     public void addSystemMemory(String memory) {
         chatMemory.add(conversation, new SystemMessage(memory));
+    }
+
+    /**
+     * Ensures the agent {@code systemPrompt} is the first message. Session hydration may add
+     * user/assistant turns before {@link com.wish.agent.base.BaseAgent#run}; without this, the
+     * model sees no system message on multi-turn {@code -c} requests.
+     */
+    public void ensureSystemPrompt(String systemPrompt) {
+        if (systemPrompt == null || systemPrompt.isBlank()) {
+            return;
+        }
+        List<Message> messages = chatMemory.get(conversation);
+        if (messages != null && !messages.isEmpty()) {
+            Message first = messages.get(0);
+            if (first instanceof SystemMessage system && systemPrompt.equals(system.getText())) {
+                return;
+            }
+        }
+        List<Message> updated = new ArrayList<>();
+        updated.add(new SystemMessage(systemPrompt));
+        if (messages != null && !messages.isEmpty()) {
+            updated.addAll(messages);
+        }
+        replaceMemory(updated);
     }
 
     public boolean hasConversation() {

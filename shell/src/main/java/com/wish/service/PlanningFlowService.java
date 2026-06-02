@@ -104,7 +104,7 @@ public class PlanningFlowService {
             session.endPrompt(result);
             return "conversation-id: %s%n%s".formatted(sessionId, result);
         } catch (RuntimeException e) {
-            session.endPrompt();
+            session.abortPrompt();
             throw e;
         }
     }
