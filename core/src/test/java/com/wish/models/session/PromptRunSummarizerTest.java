@@ -14,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PromptRunSummarizerTest {
 
-    private final PromptRunSummarizer summarizer = new PromptRunSummarizer(null, null);
+    private final PromptRunSummarizer summarizer =
+            new PromptRunSummarizer(null, null, BaseAgent.CREATE_CHAT_COMPLETION_TOOL_NAME);
 
     @Test
     void usesLastCreateChatCompletionResponse() {

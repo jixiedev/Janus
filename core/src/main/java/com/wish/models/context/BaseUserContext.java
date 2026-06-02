@@ -23,6 +23,9 @@ public class BaseUserContext extends Context{
     @Setter
     private String lastThinkResult = "";
 
+    @Setter
+    private boolean userOutputEnabled = true;
+
 
     public BaseUserContext(String conversationId, ChatMemory chatMemory) {
         this(conversationId, null, chatMemory);
@@ -72,6 +75,10 @@ public class BaseUserContext extends Context{
             }
         }
         return "";
+    }
+
+    public boolean isUserOutputEnabled() {
+        return userOutputEnabled;
     }
 
     public void addUserMemory(String memory) {

@@ -42,3 +42,8 @@
 1780370395808:janus request -p "最近一次运行卡在哪个人物" -c 123
 1780370910600:plan request -p "通过datahub mcp查看wishpost_order_clean_full_cycle表的信息" -c 123
 1780370982856:plan request -p "这个表的上下游是什么" -c 123
+1780384075043:janus request -p "帮我查一下wish的成立过程" -c 123
+1780384266410:
+1780384292049:janus request -p "帮我查一下wish的成立过程"
+1780386110852:janus request -p "帮我查一下tencent的成立过程"
+1780387663545:plan request -p "帮我查询wish的成立过程，保存到文件中"

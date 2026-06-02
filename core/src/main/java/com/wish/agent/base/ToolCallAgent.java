@@ -1,11 +1,14 @@
 package com.wish.agent.base;
 
 import com.wish.llm.LLMChatClient;
+import com.wish.support.AgentRunOutputResolver;
+import com.wish.support.Shower;
 import com.wish.support.ToolCallingPromptSupport;
 import com.wish.models.context.BaseUserContext;
 import com.wish.models.context.ToolCallUserContext;
 import org.springframework.ai.chat.memory.ChatMemory;
 import com.wish.models.AgentState;
+import com.wish.tools.BashTool;
 import com.wish.tools.CreateChatCompletionTool;
 import com.wish.tools.TerminateTool;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +39,7 @@ public class ToolCallAgent extends ReactAgent {
             call terminate(status="success") only. Do not output assistant text.
             - Otherwise, put the complete answer in create_chat_completion(response=...) this turn. \
             Do not put the answer only in assistant message text. Call terminate in a later turn, not now.
+            - Prefer plain text output (no markdown headings/lists/code fences) unless the user explicitly requests markdown.
             - Do not send a follow-up summary as assistant text after answering.
             """;
 
@@ -43,6 +47,7 @@ public class ToolCallAgent extends ReactAgent {
             You already drafted an answer in a previous step. Do not output assistant text again.
             Call create_chat_completion(response=...) with the full user-visible answer this turn, \
             then call terminate in the next turn.
+            Use plain text unless the user explicitly asks for markdown.
             """;
 
     /** Default session-memory summarizer instructions when a subclass does not override. */
@@ -54,6 +59,7 @@ public class ToolCallAgent extends ReactAgent {
 
     private static final List<Object> DEFAULT_BUILTIN_TOOLS =
             List.of(new CreateChatCompletionTool(), new TerminateTool());
+    private static volatile boolean thoughtLoggingEnabled = true;
 
     private final List<Object> mcpTools = new ArrayList<>();
     private final List<Object> skillsTools = new ArrayList<>();
@@ -155,6 +161,46 @@ public class ToolCallAgent extends ReactAgent {
         return sessionSummarySystemPrompt;
     }
 
+    public static void setThoughtLoggingEnabled(boolean enabled) {
+        thoughtLoggingEnabled = enabled;
+    }
+
+    /**
+     * Tool whose response is the canonical user-facing answer, when {@link #usesCreateChatCompletionContract()}.
+     * Used by session summarization only; not referenced from shell services.
+     */
+    public String directSessionResultTool() {
+        return usesCreateChatCompletionContract() ? CREATE_CHAT_COMPLETION_TOOL_NAME : null;
+    }
+
+    /** Clears per-conversation state held by tools that support scoped sessions (e.g. bash). */
+    public void clearConversationScopedTools(String scopeId) {
+        if (scopeId == null || scopeId.isBlank()) {
+            return;
+        }
+        for (Object tool : chatClient.getDefaultTools()) {
+            clearScopedTool(tool, scopeId);
+        }
+        for (Object tool : chatClient.getExtraTools()) {
+            clearScopedTool(tool, scopeId);
+        }
+    }
+
+    @Override
+    protected String extractUserVisibleOutput(BaseUserContext userContext, List<String> stepResults) {
+        if (usesCreateChatCompletionContract()) {
+            String fromTool = AgentRunOutputResolver.findLastToolResponse(
+                    userContext.getPromptMessages(), CREATE_CHAT_COMPLETION_TOOL_NAME);
+            if (fromTool != null && !fromTool.isBlank()) {
+                return fromTool.trim();
+            }
+        }
+        return super.extractUserVisibleOutput(userContext, stepResults);
+    }
+
+    /*
+        indicates whether to use tools.
+     */
     public boolean think(ToolCallUserContext context) {
         List<String> followUp = buildEphemeralFollowUp(context);
 
@@ -173,10 +219,15 @@ public class ToolCallAgent extends ReactAgent {
         context.setCurrentToolCalls(toolCalls);
         context.setLastThinkResult(content != null ? content : "");
 
-        log.info("{}'s thoughts: {}", name, context.getLastThinkResult());
+        String thought = context.getLastThinkResult();
+        log.info("{}'s thoughts: {}", name, thought);
+        if (thoughtLoggingEnabled && thought != null && !thought.isBlank()) {
+            Shower.LLM_THINK.show(thought, name);
+        }
         log.info("{} selected {} tools to use", name, toolCalls.size());
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
             log.info("Tool prepared: {} args={}", toolCall.name(), toolCall.arguments());
+            Shower.LLM_TOOL.show(formatToolCall(toolCall), name);
         }
 
         if (toolCalls.isEmpty()) {
@@ -191,6 +242,10 @@ public class ToolCallAgent extends ReactAgent {
                 return true;
             }
             context.addMemory(assistantMessage);
+            /*
+                still calls act() even if no tools are selected, in which case the act() will returns a instruction
+                 to let the llm select create_chat_completion to terminate.
+             */
             return !context.getLastThinkResult().isBlank();
         }
 
@@ -199,6 +254,9 @@ public class ToolCallAgent extends ReactAgent {
         return true;
     }
 
+    /*
+        return as the step result, will be appended to the final result to user.
+     */
     public String act(ToolCallUserContext context) {
         List<AssistantMessage.ToolCall> toolCalls = context.getCurrentToolCalls();
         if (toolCalls.isEmpty()) {
@@ -298,7 +356,7 @@ public class ToolCallAgent extends ReactAgent {
             }
 
             Object resultData = response.responseData();
-            log.info("Tool {} result: {}", toolName, resultData);
+            log.debug("Tool {} completed", toolName);
             if (resultData == null) {
                 continue;
             }
@@ -306,10 +364,17 @@ public class ToolCallAgent extends ReactAgent {
             if (text.isBlank()) {
                 continue;
             }
+            if (!includeToolResultInStep(toolName, text)) {
+                continue;
+            }
+            String normalized = normalizeToolResultForStep(toolName, text);
+            if (normalized.isBlank()) {
+                continue;
+            }
             if (!output.isEmpty()) {
                 output.append("\n\n");
             }
-            output.append(text);
+            output.append(normalized);
         }
 
         if (!output.isEmpty()) {
@@ -356,5 +421,32 @@ public class ToolCallAgent extends ReactAgent {
             }
         }
         return null;
+    }
+
+    private static String formatToolCall(AssistantMessage.ToolCall toolCall) {
+        return toolCall.name();
+    }
+
+    private boolean includeToolResultInStep(String toolName, String text) {
+        if (TERMINATE_TOOL_NAME.equals(toolName)) {
+            return false;
+        }
+        if (CREATE_CHAT_COMPLETION_TOOL_NAME.equals(toolName)) {
+            return true;
+        }
+        return AgentRunOutputResolver.isReadableToolResult(text);
+    }
+
+    private String normalizeToolResultForStep(String toolName, String text) {
+        if (CREATE_CHAT_COMPLETION_TOOL_NAME.equals(toolName)) {
+            return text == null ? "" : text.trim();
+        }
+        return AgentRunOutputResolver.unwrapObservation(text);
+    }
+
+    private static void clearScopedTool(Object tool, String scopeId) {
+        if (tool instanceof BashTool bashTool) {
+            bashTool.clearConversationSession(scopeId);
+        }
     }
 }

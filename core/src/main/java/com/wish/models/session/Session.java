@@ -81,11 +81,19 @@ public abstract class Session<T extends Context> {
             // especially when the final answer was not emitted via create_chat_completion.
             context.setRunResult(runResult);
         }
+        boolean showedProgress = false;
+        boolean extracted = false;
         try {
             if (persistent) {
+                showEndPromptProgressStart();
+                showedProgress = true;
                 extractToSessionMemory(context);
+                extracted = true;
             }
         } finally {
+            if (showedProgress) {
+                showEndPromptProgressEnd(extracted);
+            }
             // Optimization: keep only session memory across prompts; context partition is one-run scope.
             clearContextMemory(context);
             currentContext = null;
@@ -151,6 +159,16 @@ public abstract class Session<T extends Context> {
 
     protected void clearContextMemory(T context) {
         chatMemory.clear(context.getConversation());
+    }
+
+    protected void showEndPromptProgressStart() {
+        System.out.print("[session] end-prompt summarizing... ");
+        System.out.flush();
+    }
+
+    protected void showEndPromptProgressEnd(boolean success) {
+        System.out.println(success ? "done" : "failed");
+        System.out.flush();
     }
 
     protected abstract T createContext(String contextId);

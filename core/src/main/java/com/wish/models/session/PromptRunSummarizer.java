@@ -1,6 +1,7 @@
 package com.wish.models.session;
 
 import com.wish.agent.base.BaseAgent;
+import com.wish.support.AgentRunOutputResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -12,7 +13,6 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Builds session memory for one prompt: original user request plus agent outcome.
@@ -31,13 +31,20 @@ public class PromptRunSummarizer {
 
     private final ChatModel chatModel;
     private final String summarySystemPrompt;
+    private final String directResultToolName;
 
     public PromptRunSummarizer(ChatModel chatModel, String summarySystemPrompt) {
+        this(chatModel, summarySystemPrompt, null);
+    }
+
+    public PromptRunSummarizer(ChatModel chatModel, String summarySystemPrompt, String directResultToolName) {
         this.chatModel = chatModel;
         this.summarySystemPrompt =
                 summarySystemPrompt == null || summarySystemPrompt.isBlank()
                         ? com.wish.agent.base.ToolCallAgent.DEFAULT_SESSION_SUMMARY_SYSTEM_PROMPT
                         : summarySystemPrompt;
+        this.directResultToolName =
+                directResultToolName == null || directResultToolName.isBlank() ? null : directResultToolName.trim();
     }
 
     /**
@@ -70,10 +77,11 @@ public class PromptRunSummarizer {
     }
 
     private String extractDirectResult(List<Message> promptMessages, String runResult) {
-        // Optimization: prefer deterministic extraction to avoid unnecessary summarizer LLM calls.
-        String completion = findLastToolResponse(promptMessages, BaseAgent.CREATE_CHAT_COMPLETION_TOOL_NAME);
-        if (completion != null && !completion.isBlank()) {
-            return completion;
+        if (directResultToolName != null) {
+            String fromTool = AgentRunOutputResolver.findLastToolResponse(promptMessages, directResultToolName);
+            if (fromTool != null && !fromTool.isBlank()) {
+                return fromTool;
+            }
         }
         String assistant = findLastAssistantText(promptMessages);
         if (assistant != null && !assistant.isBlank()) {
@@ -151,26 +159,6 @@ public class PromptRunSummarizer {
             builder.append('\n');
         }
         builder.append(role).append(": ").append(truncate(text.trim(), MAX_TOOL_SNIPPET_CHARS));
-    }
-
-    private static String findLastToolResponse(List<Message> messages, String toolName) {
-        String normalized = toolName.toLowerCase(Locale.ROOT);
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            Message message = messages.get(i);
-            if (!(message instanceof ToolResponseMessage toolMessage)) {
-                continue;
-            }
-            for (ToolResponseMessage.ToolResponse response : toolMessage.getResponses()) {
-                if (response.name() != null
-                        && normalized.equals(response.name().toLowerCase(Locale.ROOT))) {
-                    String text = stringify(response.responseData());
-                    if (text != null && !text.isBlank()) {
-                        return text;
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     private static String findLastAssistantText(List<Message> messages) {

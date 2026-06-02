@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+echo "[run-shell] Building core module (skip tests)..."
+mvn -pl core install -DskipTests
+
+echo "[run-shell] Starting Janus shell..."
+mvn -f shell/pom.xml spring-boot:run "$@"
