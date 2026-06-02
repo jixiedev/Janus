@@ -31,7 +31,7 @@ import java.util.stream.Stream;
 @Service
 public class ToolCallService {
 
-    private static final String MCP_TOOL_CALLBACK_PROVIDER = "mcpToolCallbackProvider";
+    private static final String MCP_TOOL_CALLBACK_PROVIDER = "mcpToolCallbacks";
 
     protected final Map<String, ChatModel> chatModels;
     protected final List<Object> mcpTools;
@@ -41,12 +41,14 @@ public class ToolCallService {
     protected final Map<String, LLMChatClient> chatClients = new ConcurrentHashMap<>();
     protected final Map<String, ToolCallAgent> agents = new ConcurrentHashMap<>();
     private final Map<String, ToolCallSession> sessions = new ConcurrentHashMap<>();
+    protected final ApplicationContext applicationContext;
 
     public ToolCallService(
             ApplicationContext applicationContext,
             @Value("${janus.agent.tool-call.max-steps:10}") int maxSteps,
             @Value("${janus.agent.default.skills.dir:.agent/default/skills}") String defaultSkillsDir,
             @Value("${janus.agent.tool-call.skills.dir:.agent/tool-call/skills}") String agentSkillsDir) {
+        this.applicationContext = applicationContext;
         this.chatModels = resolveChatModels(applicationContext);
         this.mcpTools = resolveMcpTools(applicationContext);
         this.maxSteps = maxSteps;
@@ -110,8 +112,16 @@ public class ToolCallService {
                 log.info("OpenAI chat model alias '{}' -> api model '{}'", alias, openAi.getOptions().getModel());
             }
         });
-        if (!mcpTools.isEmpty()) {
-            log.info("Loaded {} MCP tool(s)", mcpTools.size());
+        if (applicationContext.containsBean(MCP_TOOL_CALLBACK_PROVIDER)) {
+            if (!mcpTools.isEmpty()) {
+                log.info("Loaded {} MCP tool(s)", mcpTools.size());
+            } else {
+                log.warn(
+                        "MCP client is on classpath but no tools were registered; "
+                                + "check child processes (uv/uvx) and secrets in application-local.properties");
+            }
+        } else {
+            log.info("MCP tools disabled (no {} bean)", MCP_TOOL_CALLBACK_PROVIDER);
         }
     }
 
@@ -160,7 +170,7 @@ public class ToolCallService {
             session.endPrompt(result);
             return "conversation-id: %s%n%s".formatted(sessionId, result);
         } catch (RuntimeException e) {
-            session.endPrompt();
+            session.abortPrompt();
             throw e;
         }
     }

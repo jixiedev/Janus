@@ -172,6 +172,10 @@ File: `shell/src/main/resources/application.properties`
 
 Do not commit real keys; use `application-local.properties` if gitignored.
 
+### MCP (optional)
+
+Edit `shell/src/main/resources/mcp-servers.json` (Claude Desktop format). Enabled in `application.properties` via `spring.ai.mcp.client.stdio.servers-configuration=classpath:mcp-servers.json`. Fill in tokens in the JSON, restart, and look for `Loaded N MCP tool(s)`. Disable with `spring.ai.mcp.client.enabled=false`.
+
 ---
 
 ## Troubleshooting

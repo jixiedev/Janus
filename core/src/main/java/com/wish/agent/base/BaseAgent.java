@@ -80,9 +80,7 @@ public abstract class BaseAgent {
         List<String> results = new ArrayList<>();
 
         try {
-            if (!userContext.hasConversation()) {
-                userContext.addSystemMemory(systemPrompt);
-            }
+            userContext.ensureSystemPrompt(systemPrompt);
             if (request != null && !request.isBlank()) {
                 userContext.addUserMemory(request);
             }
