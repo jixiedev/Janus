@@ -6,6 +6,7 @@ import com.wish.models.context.BaseFlowUserContext;
 import com.wish.models.context.BaseUserContext;
 import com.wish.models.context.PlanningFlowUserContext;
 import com.wish.llm.LLMChatClient;
+import com.wish.support.Shower;
 import com.wish.support.ToolCallingPromptSupport;
 import com.wish.tools.plan.Plan;
 import com.wish.tools.plan.PlanTool;
@@ -20,6 +21,8 @@ import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Planning and step execution flow. */
 @Slf4j
@@ -69,6 +72,8 @@ public class PlanningFlow extends BaseFlow {
     private static final String PLAN_SECTION_HEADER = "=== Plan ===";
     private static final String STEP_PREP_FORMAT =
             ">>> Preparing step %d: \"%s\" (agent: %s)";
+    private static final int STEP_SUMMARY_MAX_CHARS = 240;
+    private static final Pattern PATH_PATTERN = Pattern.compile("(?:/[^\\s\"']+|workspace/[^\\s\"']+)");
 
     private final PlanTool planTool;
     private final ToolCallingManager toolCallingManager;
@@ -150,19 +155,18 @@ public class PlanningFlow extends BaseFlow {
                 context.initializePlan();
             }
 
-            StringBuilder result = new StringBuilder();
+            List<String> stepSummaries = new ArrayList<>();
+            Set<String> artifacts = new LinkedHashSet<>();
             if (planTool.hasPlan(planId)) {
-                appendPlanSection(result, planId);
+                String section = formatPlanSection(planId);
+                log.info("Plan status ({}):\n{}", planId, section);
+                Shower.PLAN_PROGRESS.show(section, "PlanningFlow");
             }
 
             while (true) {
                 Pair<Integer, Map<String, String>> stepInfo = getCurrentStepInfo(planId);
                 int stepIndex = stepInfo.getLeft();
                 if (stepIndex < 0) {
-                    if (planTool.hasPlan(planId)) {
-                        appendPlanSection(result, planId);
-                    }
-                    result.append(finalizePlan(context));
                     break;
                 }
 
@@ -170,13 +174,20 @@ public class PlanningFlow extends BaseFlow {
                 String stepType = info.get("type");
                 BaseAgent executor = getExecutor(stepType);
                 BaseUserContext executorContext = requireExecutorContext(context, executor);
+                executorContext.setUserOutputEnabled(false);
 
-                appendStepPreparation(result, stepIndex, info, executor);
-                appendPlanSection(result, planId);
+                String prepLine = appendStepPreparation(stepIndex, info, executor);
+                if (planTool.hasPlan(planId)) {
+                    log.info("Plan status ({}):\n{}", planId, formatPlanSection(planId));
+                }
 
                 String stepResult = executeStep(context, executor, executorContext, stepIndex, info);
-                result.append(stepResult).append('\n');
-                appendPlanSection(result, planId);
+                String stepSummary = summarizeStepResult(stepResult);
+                stepSummaries.add("%s -> %s".formatted(prepLine, stepSummary));
+                collectArtifacts(stepResult, artifacts);
+                if (planTool.hasPlan(planId)) {
+                    log.info("Plan status ({}):\n{}", planId, formatPlanSection(planId));
+                }
 
                 if (executor.getAgentState() == AgentState.FINISHED) {
                     log.info("Executor {} finished early; stopping plan loop", executor.getName());
@@ -184,7 +195,8 @@ public class PlanningFlow extends BaseFlow {
                 }
             }
 
-            return result.toString().strip();
+            String finalSummary = finalizePlan(context);
+            return buildUserSummary(stepSummaries, artifacts, finalSummary);
         } catch (Exception e) {
             log.error("Error in PlanningFlow", e);
             return "Execution failed: " + e.getMessage();
@@ -335,12 +347,6 @@ public class PlanningFlow extends BaseFlow {
                 "Expected PlanningFlowUserContext but got " + baseFlowUserContext.getClass().getName());
     }
 
-    private void appendPlanSection(StringBuilder result, String planId) {
-        String section = formatPlanSection(planId);
-        log.info("Plan status ({}):\n{}", planId, section);
-        result.append(section).append("\n\n");
-    }
-
     private String formatPlanSection(String planId) {
         if (!planTool.hasPlan(planId)) {
             return PLAN_SECTION_HEADER + "\nPlan not found: " + planId;
@@ -348,13 +354,12 @@ public class PlanningFlow extends BaseFlow {
         return PLAN_SECTION_HEADER + "\n" + planTool.getPlan(planId).format();
     }
 
-    private void appendStepPreparation(
-            StringBuilder result, int stepIndex, Map<String, String> stepInfo, BaseAgent executor) {
+    private String appendStepPreparation(int stepIndex, Map<String, String> stepInfo, BaseAgent executor) {
         String stepText = stepInfo.getOrDefault("text", "Step " + stepIndex);
         String agentKey = resolveExecutorKey(executor);
         String line = STEP_PREP_FORMAT.formatted(stepIndex, stepText, agentKey);
         log.info(line);
-        result.append(line).append('\n');
+        return line;
     }
 
     private String resolveExecutorKey(BaseAgent executor) {
@@ -364,6 +369,52 @@ public class PlanningFlow extends BaseFlow {
             }
         }
         return executor.getName() != null ? executor.getName() : "unknown";
+    }
+
+    private static String summarizeStepResult(String stepResult) {
+        if (stepResult == null || stepResult.isBlank()) {
+            return "(no output)";
+        }
+        String normalized = stepResult.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= STEP_SUMMARY_MAX_CHARS) {
+            return normalized;
+        }
+        return normalized.substring(0, STEP_SUMMARY_MAX_CHARS - 1) + "…";
+    }
+
+    private static void collectArtifacts(String text, Set<String> artifacts) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        Matcher matcher = PATH_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String path = matcher.group();
+            if (path.length() < 4) {
+                continue;
+            }
+            if (path.endsWith(".") || path.endsWith(",")) {
+                path = path.substring(0, path.length() - 1);
+            }
+            artifacts.add(path);
+        }
+    }
+
+    private static String buildUserSummary(List<String> stepSummaries, Set<String> artifacts, String finalSummary) {
+        StringBuilder summary = new StringBuilder("Plan completed.");
+        if (!stepSummaries.isEmpty()) {
+            summary.append("\n\nStep summaries:");
+            for (int i = 0; i < stepSummaries.size(); i++) {
+                summary.append("\n").append(i + 1).append(". ").append(stepSummaries.get(i));
+            }
+        }
+        if (!artifacts.isEmpty()) {
+            summary.append("\n\nArtifacts:");
+            artifacts.forEach(path -> summary.append("\n- ").append(path));
+        }
+        if (finalSummary != null && !finalSummary.isBlank()) {
+            summary.append("\n\nFinal summary:\n").append(finalSummary.trim());
+        }
+        return summary.toString();
     }
 
 }

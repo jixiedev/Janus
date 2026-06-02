@@ -2,6 +2,7 @@ package com.wish.models.context;
 
 import lombok.Getter;
 import lombok.Setter;
+import com.wish.support.Utils;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -61,7 +62,7 @@ public class Context {
         long total = usage.getTotalTokens();
         this.tokenUsage.add(prompt, completion, total);
 
-        String normalizedTag = normalizeUsageTag(usageTag);
+        String normalizedTag = Utils.trimToDefault(usageTag, DEFAULT_USAGE_TAG);
         tokenUsageByTag
                 .computeIfAbsent(normalizedTag, key -> new TokenUsageCounter())
                 .add(prompt, completion, total);
@@ -75,14 +76,6 @@ public class Context {
         Map<String, TokenUsageCounter> details = new LinkedHashMap<>();
         tokenUsageByTag.forEach((tag, usage) -> details.put(tag, usage.copy()));
         return Map.copyOf(details);
-    }
-
-    private static String normalizeUsageTag(String usageTag) {
-        if (usageTag == null) {
-            return DEFAULT_USAGE_TAG;
-        }
-        String trimmed = usageTag.trim();
-        return trimmed.isEmpty() ? DEFAULT_USAGE_TAG : trimmed;
     }
 
     @Getter

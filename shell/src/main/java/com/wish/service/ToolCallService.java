@@ -5,7 +5,7 @@ import com.wish.models.context.ToolCallUserContext;
 import com.wish.models.session.ToolCallSession;
 import com.wish.llm.LLMChatClient;
 import com.wish.support.AgentRunSupport;
-import com.wish.tools.BashTool;
+import com.wish.support.Utils;
 import lombok.extern.slf4j.Slf4j;
 import org.springaicommunity.agent.tools.FileSystemTools;
 import org.springaicommunity.agent.tools.ShellTools;
@@ -42,18 +42,22 @@ public class ToolCallService {
     protected final Map<String, ToolCallAgent> agents = new ConcurrentHashMap<>();
     private final Map<String, ToolCallSession> sessions = new ConcurrentHashMap<>();
     protected final ApplicationContext applicationContext;
+    protected final boolean verboseThought;
 
     public ToolCallService(
             ApplicationContext applicationContext,
             @Value("${janus.agent.tool-call.max-steps:10}") int maxSteps,
             @Value("${janus.agent.default.skills.dir:.agent/default/skills}") String defaultSkillsDir,
-            @Value("${janus.agent.tool-call.skills.dir:.agent/tool-call/skills}") String agentSkillsDir) {
+            @Value("${janus.agent.tool-call.skills.dir:.agent/tool-call/skills}") String agentSkillsDir,
+            @Value("${janus.shell.verbose-thought:true}") boolean verboseThought) {
         this.applicationContext = applicationContext;
         this.chatModels = resolveChatModels(applicationContext);
         this.mcpTools = resolveMcpTools(applicationContext);
         this.maxSteps = maxSteps;
+        this.verboseThought = verboseThought;
         this.chatMemory = MessageWindowChatMemory.builder().build();
         this.skillTools = resolveSkillTools(List.of(defaultSkillsDir, agentSkillsDir));
+        ToolCallAgent.setThoughtLoggingEnabled(verboseThought);
     }
 
     protected List<Object> resolveSkillTools(List<String> skillDirs) {
@@ -101,12 +105,13 @@ public class ToolCallService {
         return new ToolCallAgent(chatClient, maxSteps, mcpTools, skillTools);
     }
 
-    protected ToolCallSession createSession(String sessionId, ChatModel chatModel, String summarySystemPrompt) {
-        return new ToolCallSession(sessionId, chatMemory, chatModel, summarySystemPrompt);
+    protected ToolCallSession createSession(String sessionId, ChatModel chatModel, ToolCallAgent agent) {
+        return new ToolCallSession(sessionId, chatMemory, chatModel, agent.sessionSummarySystemPrompt(), agent.directSessionResultTool());
     }
 
     protected void logStartup() {
         log.info("Registered chat models: {}", chatModels.keySet());
+        log.info("Thought logging enabled: {}", verboseThought);
         chatModels.forEach((alias, model) -> {
             if (model instanceof OpenAiChatModel openAi) {
                 log.info("OpenAI chat model alias '{}' -> api model '{}'", alias, openAi.getOptions().getModel());
@@ -134,7 +139,7 @@ public class ToolCallService {
      *                  When null/blank, uses a one-off context (not merged into session memory).
      */
     public String run(String prompt, String model, String sessionId) {
-        String modelKey = normalizeModelAlias(model);
+        String modelKey = Utils.normalizeModelAlias(model);
         ToolCallAgent agent = agents.get(modelKey);
         if (agent == null) {
             String available = chatModels.isEmpty()
@@ -144,7 +149,7 @@ public class ToolCallService {
                     "Unknown model '%s'. Available: %s".formatted(model, available));
         }
 
-        String normalizedSessionId = normalizeSessionId(sessionId);
+        String normalizedSessionId = Utils.trimToNull(sessionId);
         if (normalizedSessionId == null) {
             return runEphemeral(agent, prompt);
         }
@@ -157,18 +162,13 @@ public class ToolCallService {
                 cacheKey,
                 key -> {
                     log.info("New session '{}' (model={})", sessionId, modelKey);
-                    return createSession(
-                            sessionId,
-                            agent.getChatClient().getChatModel(),
-                            agent.sessionSummarySystemPrompt());
+                    return createSession(sessionId, agent.getChatClient().getChatModel(), agent);
                 });
         ToolCallUserContext context = session.beginPrompt(prompt);
         try {
-            String result = AgentRunSupport.runWithTokenLogging(context, () -> agent.run(context, prompt));
-            // Optimization: pass run result into endPrompt so summarize can keep useful outcome
-            // even when tool traces are imperfect.
-            session.endPrompt(result);
-            return "conversation-id: %s%n%s".formatted(sessionId, result);
+            AgentRunSupport.runWithTokenLogging(context, () -> agent.run(context, prompt));
+            session.endPrompt(context.getRunResult());
+            return "conversation-id: %s".formatted(sessionId);
         } catch (RuntimeException e) {
             session.abortPrompt();
             throw e;
@@ -179,24 +179,25 @@ public class ToolCallService {
         String contextId = "ephemeral:" + UUID.randomUUID();
         ToolCallUserContext context = new ToolCallUserContext(contextId, chatMemory);
         try {
-            return AgentRunSupport.runWithTokenLogging(context, () -> agent.run(context, prompt));
+            AgentRunSupport.runWithTokenLogging(context, () -> agent.run(context, prompt));
+            return "";
         } finally {
             // Optimization: no -c means one-off request; skip session extraction and purge state eagerly.
             chatMemory.clear(contextId);
-            clearConversationBashSession(agent, contextId);
+            clearConversationScopedTools(agent, contextId);
         }
     }
 
     public void clearSession(String sessionId, String model) {
-        String modelKey = normalizeModelAlias(model);
-        String normalized = normalizeSessionId(sessionId);
+        String modelKey = Utils.normalizeModelAlias(model);
+        String normalized = Utils.trimToNull(sessionId);
         if (normalized == null) {
             throw new IllegalArgumentException("conversation-id is required");
         }
         String key = sessionKey(modelKey, normalized);
         ToolCallSession removed = sessions.remove(key);
         ToolCallAgent agent = agents.get(modelKey);
-        clearConversationBashSession(agent, normalized);
+        clearConversationScopedTools(agent, normalized);
         if (removed == null) {
             chatMemory.clear(ToolCallSession.SESSION_KEY_PREFIX + normalized);
             log.info("No session to clear for conversation '{}' (model={})", normalized, modelKey);
@@ -208,14 +209,6 @@ public class ToolCallService {
 
     protected static String sessionKey(String modelKey, String sessionId) {
         return modelKey + ":" + sessionId;
-    }
-
-    protected static String normalizeSessionId(String sessionId) {
-        if (sessionId == null) {
-            return null;
-        }
-        String trimmed = sessionId.trim();
-        return trimmed.isEmpty() ? null : trimmed;
     }
 
     protected static Map<String, ChatModel> resolveChatModels(ApplicationContext context) {
@@ -239,10 +232,6 @@ public class ToolCallService {
             return "sensenova";
         }
         return null;
-    }
-
-    protected static String normalizeModelAlias(String model) {
-        return model == null ? "" : model.trim().toLowerCase(Locale.ROOT);
     }
 
     protected static List<Object> resolveMcpTools(ApplicationContext context) {
@@ -277,26 +266,10 @@ public class ToolCallService {
         }
     }
 
-    protected static void clearConversationBashSession(ToolCallAgent agent, String scopeId) {
-        if (agent == null || scopeId == null || scopeId.isBlank()) {
+    protected static void clearConversationScopedTools(ToolCallAgent agent, String scopeId) {
+        if (agent == null) {
             return;
         }
-        findBashTools(agent).forEach(tool -> tool.clearConversationSession(scopeId));
-    }
-
-    private static List<BashTool> findBashTools(ToolCallAgent agent) {
-        List<BashTool> bashTools = new ArrayList<>();
-        LLMChatClient client = agent.getChatClient();
-        for (Object tool : client.getDefaultTools()) {
-            if (tool instanceof BashTool bashTool) {
-                bashTools.add(bashTool);
-            }
-        }
-        for (Object tool : client.getExtraTools()) {
-            if (tool instanceof BashTool bashTool) {
-                bashTools.add(bashTool);
-            }
-        }
-        return bashTools;
+        agent.clearConversationScopedTools(scopeId);
     }
 }

@@ -8,6 +8,7 @@ import com.wish.models.context.PlanningFlowUserContext;
 import com.wish.models.session.PlanningFlowSession;
 import com.wish.models.session.Session;
 import com.wish.support.AgentRunSupport;
+import com.wish.support.Utils;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -67,7 +68,7 @@ public class PlanningFlowService {
      *                  When null/blank, uses a one-off context (not merged into session memory).
      */
     public String run(String prompt, String model, String sessionId) {
-        String modelKey = normalizeModelAlias(model);
+        String modelKey = Utils.normalizeModelAlias(model);
         PlanningFlow planningFlow = planningFlows.get(modelKey);
         if (planningFlow == null) {
             Set<String> available = planningFlows.isEmpty()
@@ -77,7 +78,7 @@ public class PlanningFlowService {
                     "Unknown model '%s'. Available: %s".formatted(model, String.join(", ", available)));
         }
 
-        String normalizedSessionId = normalizeSessionId(sessionId);
+        String normalizedSessionId = Utils.trimToNull(sessionId);
         if (normalizedSessionId == null) {
             return runEphemeral(planningFlow, prompt);
         }
@@ -113,8 +114,9 @@ public class PlanningFlowService {
         String contextId = "ephemeral:" + UUID.randomUUID();
         PlanningFlowUserContext planningFlowUserContext = new PlanningFlowUserContext(contextId, chatMemory);
         try {
-            return AgentRunSupport.runWithTokenLogging(
+            String result = AgentRunSupport.runWithTokenLogging(
                     planningFlowUserContext, () -> planningFlow.execute(planningFlowUserContext, prompt));
+            return result;
         } finally {
             planningFlowUserContext.clearAllMemoryPartitions(chatMemory);
             clearPlanningFlowBashSessions(planningFlow, contextId);
@@ -122,8 +124,8 @@ public class PlanningFlowService {
     }
 
     public void clearSession(String sessionId, String model) {
-        String modelKey = normalizeModelAlias(model);
-        String normalized = normalizeSessionId(sessionId);
+        String modelKey = Utils.normalizeModelAlias(model);
+        String normalized = Utils.trimToNull(sessionId);
         if (normalized == null) {
             throw new IllegalArgumentException("conversation-id is required");
         }
@@ -150,7 +152,7 @@ public class PlanningFlowService {
         }
         for (BaseAgent agent : planningFlow.getAgents().values()) {
             if (agent instanceof ToolCallAgent toolCallAgent) {
-                clearConversationBashSession(toolCallAgent, scopeId);
+                ToolCallService.clearConversationScopedTools(toolCallAgent, scopeId);
             }
         }
     }

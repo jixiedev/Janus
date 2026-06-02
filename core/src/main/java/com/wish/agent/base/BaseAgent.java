@@ -3,6 +3,8 @@ package com.wish.agent.base;
 import com.wish.llm.LLMChatClient;
 import com.wish.models.AgentState;
 import com.wish.models.context.BaseUserContext;
+import com.wish.support.AgentRunOutputResolver;
+import com.wish.support.Shower;
 import org.springframework.ai.chat.memory.ChatMemory;
 import lombok.Getter;
 import lombok.Setter;
@@ -102,7 +104,13 @@ public abstract class BaseAgent {
             if (userContext.getCurrentStep() >= maxSteps && agentState != AgentState.FINISHED) {
                 results.add("Terminated: Reached max steps (%d)".formatted(maxSteps));
             }
-            return results.isEmpty() ? "No steps executed" : String.join("\n", results);
+            String trace = AgentRunOutputResolver.formatRunTrace(results);
+            String userVisible = extractUserVisibleOutput(userContext, results);
+            userContext.setRunResult(trace);
+            if (userContext.isUserOutputEnabled()) {
+                Shower.USER.show(userVisible, name);
+            }
+            return userVisible;
         } catch (Exception e) {
             transitState(AgentState.ERROR);
             log.error("Agent run failed at step {}/{}", userContext.getCurrentStep(), maxSteps, e);
@@ -142,5 +150,10 @@ public abstract class BaseAgent {
 
     protected void cleanup() {
         nextStepPrompt = originalNextStepPrompt;
+    }
+
+    /** Console/session user-visible text; subclasses may apply agent-specific tool contracts. */
+    protected String extractUserVisibleOutput(BaseUserContext userContext, List<String> stepResults) {
+        return AgentRunOutputResolver.extractUserVisibleFromSteps(userContext, stepResults);
     }
 }

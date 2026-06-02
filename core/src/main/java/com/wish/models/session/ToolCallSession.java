@@ -12,14 +12,19 @@ public class ToolCallSession extends Session<ToolCallUserContext> {
 
     private final PromptRunSummarizer summarizer;
 
-    public ToolCallSession(String sessionId, ChatMemory chatMemory, ChatModel chatModel, String summarySystemPrompt) {
+    public ToolCallSession(
+            String sessionId,
+            ChatMemory chatMemory,
+            ChatModel chatModel,
+            String summarySystemPrompt,
+            String directResultToolName) {
         super(sessionId, chatMemory, true);
-        this.summarizer = new PromptRunSummarizer(chatModel, summarySystemPrompt);
+        this.summarizer = new PromptRunSummarizer(chatModel, summarySystemPrompt, directResultToolName);
     }
 
     /** For tests without LLM summarization (heuristic + runResult fallback only). */
     ToolCallSession(String sessionId, ChatMemory chatMemory, String summarySystemPrompt) {
-        this(sessionId, chatMemory, null, summarySystemPrompt);
+        this(sessionId, chatMemory, null, summarySystemPrompt, null);
     }
 
     @Override
