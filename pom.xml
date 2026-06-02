@@ -24,6 +24,7 @@
     <modules>
         <module>core</module>
         <module>shell</module>
+        <module>diagnostic</module>
     </modules>
     <scm>
         <connection/>
