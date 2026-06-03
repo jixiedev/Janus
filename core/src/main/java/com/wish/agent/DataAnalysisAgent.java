@@ -10,6 +10,7 @@ import com.wish.tools.analysis.VisualizationPrepareTool;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 
 public class DataAnalysisAgent extends ToolCallAgent {
     private static final String NAME = "DataAnalysis";
@@ -40,8 +41,8 @@ public class DataAnalysisAgent extends ToolCallAgent {
             Keep it concise. Do not include raw logs or stack traces.
             """;
 
-    public DataAnalysisAgent(LLMChatClient llmChatClient, int maxSteps, Path workspaceRoot) {
-        this(llmChatClient, maxSteps, workspaceRoot, List.of());
+    public DataAnalysisAgent(Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot) {
+        this(chatClientSupplier, maxSteps, workspaceRoot, List.of());
     }
 
     private static List<Object> builtinTools(Path workspaceRoot, LLMChatClient llmChatClient) {
@@ -53,26 +54,28 @@ public class DataAnalysisAgent extends ToolCallAgent {
                 new TerminateTool());
     }
 
-    public DataAnalysisAgent(LLMChatClient llmChatClient, int maxSteps, Path workspaceRoot, List<Object> mcpTools) {
-        this(llmChatClient, maxSteps, workspaceRoot, mcpTools, List.of());
+    public DataAnalysisAgent(
+            Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot, List<Object> mcpTools) {
+        this(chatClientSupplier, maxSteps, workspaceRoot, mcpTools, List.of());
     }
 
     public DataAnalysisAgent(
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps,
             Path workspaceRoot,
             List<Object> mcpTools,
             List<Object> skillsTools) {
+        LLMChatClient client = chatClientSupplier.get();
         super(
                 NAME,
                 DESCRIPTION,
                 SYSTEM_PROMPT.formatted(workspaceRoot.toAbsolutePath().normalize()),
                 NEXT_STEP_PROMPT,
                 SESSION_SUMMARY_SYSTEM_PROMPT,
-                llmChatClient,
+                () -> client,
                 maxSteps,
                 mcpTools,
                 skillsTools,
-                builtinTools(workspaceRoot, llmChatClient));
+                builtinTools(workspaceRoot, client));
     }
 }

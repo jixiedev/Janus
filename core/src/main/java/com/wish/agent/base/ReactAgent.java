@@ -3,6 +3,8 @@ package com.wish.agent.base;
 import com.wish.models.context.BaseUserContext;
 import com.wish.llm.LLMChatClient;
 
+import java.util.function.Supplier;
+
 public abstract class ReactAgent extends BaseAgent {
 
     protected ReactAgent(
@@ -10,9 +12,9 @@ public abstract class ReactAgent extends BaseAgent {
             String description,
             String systemPrompt,
             String nextStepPrompt,
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps) {
-        super(name, description, systemPrompt, nextStepPrompt, llmChatClient, maxSteps);
+        super(name, description, systemPrompt, nextStepPrompt, chatClientSupplier, maxSteps);
     }
 
     @Override

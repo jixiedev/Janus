@@ -16,6 +16,7 @@ import com.wish.tools.web.WebSearchSettings;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /** Janus general-purpose agent (local tools + optional MCP). */
 public class JanusAgent extends ToolCallAgent {
@@ -71,25 +72,26 @@ public class JanusAgent extends ToolCallAgent {
         return List.copyOf(tools);
     }
 
-    public JanusAgent(LLMChatClient llmChatClient, int maxSteps, Path workspaceRoot) {
-        this(llmChatClient, maxSteps, workspaceRoot, List.of(), List.of(), WebSearchSettings.defaults());
-    }
-
-    public JanusAgent(LLMChatClient llmChatClient, int maxSteps, Path workspaceRoot, List<Object> mcpTools) {
-        this(llmChatClient, maxSteps, workspaceRoot, mcpTools, List.of(), WebSearchSettings.defaults());
+    public JanusAgent(Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot) {
+        this(chatClientSupplier, maxSteps, workspaceRoot, List.of(), List.of(), WebSearchSettings.defaults());
     }
 
     public JanusAgent(
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot, List<Object> mcpTools) {
+        this(chatClientSupplier, maxSteps, workspaceRoot, mcpTools, List.of(), WebSearchSettings.defaults());
+    }
+
+    public JanusAgent(
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps,
             Path workspaceRoot,
             List<Object> mcpTools,
             List<Object> skillsTools) {
-        this(llmChatClient, maxSteps, workspaceRoot, mcpTools, skillsTools, WebSearchSettings.defaults());
+        this(chatClientSupplier, maxSteps, workspaceRoot, mcpTools, skillsTools, WebSearchSettings.defaults());
     }
 
     public JanusAgent(
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps,
             Path workspaceRoot,
             List<Object> mcpTools,
@@ -101,7 +103,7 @@ public class JanusAgent extends ToolCallAgent {
                 SYSTEM_PROMPT.formatted(workspaceRoot.toAbsolutePath().normalize()),
                 NEXT_STEP_PROMPT,
                 SESSION_SUMMARY_SYSTEM_PROMPT,
-                llmChatClient,
+                chatClientSupplier,
                 maxSteps,
                 mcpTools,
                 skillsTools,

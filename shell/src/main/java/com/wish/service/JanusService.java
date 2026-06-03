@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.function.Supplier;
 
 @Slf4j
 @Service
@@ -52,8 +53,8 @@ public class JanusService extends ToolCallService {
     }
 
     @Override
-    protected ToolCallAgent createAgent(LLMChatClient chatClient) {
-        return new JanusAgent(chatClient, maxSteps, workspaceRoot, mcpTools, skillTools, webSearchSettings);
+    protected ToolCallAgent createAgent(Supplier<LLMChatClient> chatClientSupplier) {
+        return new JanusAgent(chatClientSupplier, maxSteps, workspaceRoot, mcpTools, skillTools, webSearchSettings);
     }
 
     private static WebSearchSettings.Provider parseProvider(String value) {
