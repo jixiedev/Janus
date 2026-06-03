@@ -14,7 +14,7 @@
 
 ```bash
 cd /path/to/Janus
-mvn -pl core install -DskipTests
+mvn -pl core,diagnostic install -DskipTests
 mvn -f shell/pom.xml spring-boot:run
 ```
 
@@ -36,6 +36,7 @@ mvn -f shell/pom.xml spring-boot:run
 | `janus` | 通用助手（规划、Python、文件、人工） | `workspace/janus` |
 | `da` | 数据分析与可视化 | `workspace/da` |
 | `swe` | 终端 + 文件编辑编程 | `workspace/swe` |
+| `diagnostic` | 多阶段事故调查（取证 → 分析 → 验证 → 结案） | —（stage 使用 MCP） |
 
 | 参数 | 简写 | 说明 |
 |------|------|------|
@@ -138,6 +139,22 @@ shell:> swe request -p "在 workspace 下查看目录结构，并说明如何运
 ```
 
 使用 `bash` 与 `str_replace_editor`；同一 `-c` 下共用独立 bash 会话（`cd`、环境变量会保留）。
+
+---
+
+## 案例：事故调查（diagnostic）
+
+```text
+shell:> diagnostic request -p "Airflow DAG daily_sales 今早 3 点失败，帮我调查根因" -m sensenova -c incident-1
+```
+
+多阶段流程（COLLECT → ANALYZE → VALIDATE → TERMINATE）；各 stage 可用工具在 `Stage` 枚举中配置（如 COLLECT/VALIDATE 含 `query_warehouse` + 全部 MCP，ANALYZE 仅 `query_warehouse`）。Trino 凭证：优先读工作目录或 `$HOME` 下的 `.presto_env`，否则用 `PRESTO_USER` / `PRESTO_PASSWORD` / `PRESTO_HOST`（或 `TRINO_*`、`PRESTO_JDBC_URL`）。同一 `-c` 可追问：
+
+```text
+shell:> diagnostic request -p "下游表是否受影响？" -m sensenova -c incident-1
+```
+
+每次 `request` 结束会在报告目录写入本次 incident 总结（`.md` + `.json`）：默认 `~/.janus/diagnostic-reports/`；`-c session` 落在 `sessions/{sessionId}/`，无 `-c` 落在 `ephemeral/`。配置项 `janus.diagnostic.reports-dir` 或环境变量 `JANUS_DIAGNOSTIC_REPORTS_DIR`。清除会话（`clear-session`）时会在该 session 目录下追加关闭标记文件。
 
 ---
 

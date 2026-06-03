@@ -17,6 +17,15 @@
             <artifactId>core</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.wish</groupId>
+            <artifactId>diagnostic</artifactId>
+        </dependency>
+        <!-- Explicit: ensures query_warehouse works when core POM parent is unresolved in IDE/partial builds -->
+        <dependency>
+            <groupId>io.trino</groupId>
+            <artifactId>trino-jdbc</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
         </dependency>

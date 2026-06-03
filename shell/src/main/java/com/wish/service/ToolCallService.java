@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -91,18 +92,22 @@ public class ToolCallService {
     }
 
     protected void registerModel(String modelKey, ChatModel chatModel) {
-        LLMChatClient client = createChatClient(chatModel);
-        ToolCallAgent agent = createAgent(client);
-        chatClients.put(modelKey, client);
+        Supplier<LLMChatClient> clientSupplier = chatClientSupplier(chatModel);
+        ToolCallAgent agent = createAgent(clientSupplier);
+        chatClients.put(modelKey, agent.getChatClient());
         agents.put(modelKey, agent);
+    }
+
+    protected Supplier<LLMChatClient> chatClientSupplier(ChatModel chatModel) {
+        return () -> createChatClient(chatModel);
     }
 
     protected LLMChatClient createChatClient(ChatModel chatModel) {
         return new LLMChatClient(chatModel, Collections.emptyList());
     }
 
-    protected ToolCallAgent createAgent(LLMChatClient chatClient) {
-        return new ToolCallAgent(chatClient, maxSteps, mcpTools, skillTools);
+    protected ToolCallAgent createAgent(Supplier<LLMChatClient> chatClientSupplier) {
+        return new ToolCallAgent(chatClientSupplier, maxSteps, mcpTools, skillTools);
     }
 
     protected ToolCallSession createSession(String sessionId, ChatModel chatModel, ToolCallAgent agent) {

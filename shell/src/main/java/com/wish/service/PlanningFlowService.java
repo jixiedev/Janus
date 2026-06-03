@@ -47,13 +47,14 @@ public class PlanningFlowService {
         Map<String, ToolCallAgent> janusAgents = janusService.agents;
         Map<String, ToolCallAgent> daAgents = daService.agents;
         Map<String, ToolCallAgent> sweAgents = sweService.agents;
-        Map<String, LLMChatClient> chatClients = janusService.chatClients;
         for (String model : janusAgents.keySet()) {
             Map<String, BaseAgent> agents = new HashMap<>();
             agents.put("janus", janusAgents.get(model));
             agents.put("da", daAgents.get(model));
             agents.put("swe", sweAgents.get(model));
-            PlanningFlow planningFlow = new PlanningFlow(chatClients.get(model), agents, "janus");
+            ChatModel chatModel = janusService.chatModels.get(model);
+            LLMChatClient planningClient = janusService.createChatClient(chatModel);
+            PlanningFlow planningFlow = new PlanningFlow(planningClient, agents, "janus");
             planningFlows.put(model, planningFlow);
         }
         log.info("Registered planning flows for models: {}", planningFlows.keySet());

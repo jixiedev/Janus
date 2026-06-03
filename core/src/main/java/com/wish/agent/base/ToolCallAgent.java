@@ -25,15 +25,16 @@ import org.springframework.ai.model.tool.ToolExecutionResult;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Supplier;
 
 @Slf4j
 public class ToolCallAgent extends ReactAgent {
     private static final String NAME = "toolcall";
     private static final String DESCRIPTION = "an agent that can execute tool calls";
-    private static final String SYSTEM_PROMPT =
+    protected static final String SYSTEM_PROMPT =
             "You are a helpful assistant. Use the provided tools when they apply. "
                     + "Match the user's language. Do not repeat yourself across turns.";
-    private static final String NEXT_STEP_PROMPT = """
+    protected static final String NEXT_STEP_PROMPT = """
             Decide the single best action for this turn:
             - If the user request is already fully answered via create_chat_completion in the conversation, \
             call terminate(status="success") only. Do not output assistant text.
@@ -78,22 +79,23 @@ public class ToolCallAgent extends ReactAgent {
 
     private final String sessionSummarySystemPrompt;
 
-    public ToolCallAgent(LLMChatClient llmChatClient, int maxSteps) {
-        this(llmChatClient, maxSteps, List.of(), List.of());
+    public ToolCallAgent(Supplier<LLMChatClient> chatClientSupplier, int maxSteps) {
+        this(chatClientSupplier, maxSteps, List.of(), List.of());
     }
 
-    public ToolCallAgent(LLMChatClient llmChatClient, int maxSteps, List<Object> mcpTools) {
-        this(llmChatClient, maxSteps, mcpTools, List.of());
+    public ToolCallAgent(Supplier<LLMChatClient> chatClientSupplier, int maxSteps, List<Object> mcpTools) {
+        this(chatClientSupplier, maxSteps, mcpTools, List.of());
     }
 
-    public ToolCallAgent(LLMChatClient llmChatClient, int maxSteps, List<Object> mcpTools, List<Object> skillsTools) {
+    public ToolCallAgent(
+            Supplier<LLMChatClient> chatClientSupplier, int maxSteps, List<Object> mcpTools, List<Object> skillsTools) {
         this(
                 NAME,
                 DESCRIPTION,
                 SYSTEM_PROMPT,
                 NEXT_STEP_PROMPT,
                 SESSION_SUMMARY_SYSTEM_PROMPT,
-                llmChatClient,
+                chatClientSupplier,
                 maxSteps,
                 mcpTools,
                 skillsTools,
@@ -106,7 +108,7 @@ public class ToolCallAgent extends ReactAgent {
             String systemPrompt,
             String nextStepPrompt,
             String sessionSummarySystemPrompt,
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps,
             List<Object> mcpTools,
             List<Object> builtinTools) {
@@ -116,7 +118,7 @@ public class ToolCallAgent extends ReactAgent {
                 systemPrompt,
                 nextStepPrompt,
                 sessionSummarySystemPrompt,
-                llmChatClient,
+                chatClientSupplier,
                 maxSteps,
                 mcpTools,
                 List.of(),
@@ -129,12 +131,12 @@ public class ToolCallAgent extends ReactAgent {
             String systemPrompt,
             String nextStepPrompt,
             String sessionSummarySystemPrompt,
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps,
             List<Object> mcpTools,
             List<Object> skillsTools,
             List<Object> builtinTools) {
-        super(name, description, systemPrompt, nextStepPrompt, llmChatClient, maxSteps);
+        super(name, description, systemPrompt, nextStepPrompt, chatClientSupplier, maxSteps);
         this.sessionSummarySystemPrompt =
                 sessionSummarySystemPrompt == null || sessionSummarySystemPrompt.isBlank()
                         ? DEFAULT_SESSION_SUMMARY_SYSTEM_PROMPT

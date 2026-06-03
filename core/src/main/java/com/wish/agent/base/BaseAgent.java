@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 @Slf4j
 public abstract class BaseAgent {
@@ -54,14 +55,14 @@ public abstract class BaseAgent {
             String description,
             String systemPrompt,
             String nextStepPrompt,
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps) {
         this.name = name;
         this.description = description;
         this.systemPrompt = systemPrompt;
         this.nextStepPrompt = nextStepPrompt;
         this.originalNextStepPrompt = nextStepPrompt;
-        this.chatClient = llmChatClient;
+        this.chatClient = chatClientSupplier.get();
         this.maxSteps = maxSteps;
         this.agentState = AgentState.IDLE;
     }

@@ -8,6 +8,7 @@ import com.wish.tools.TerminateTool;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 
 public class SWEAgent extends ToolCallAgent {
     private static final int VIEW_WINDOW_LINES = 4;
@@ -67,8 +68,8 @@ public class SWEAgent extends ToolCallAgent {
             Keep it concise. Do not include raw logs or stack traces.
             """;
 
-    public SWEAgent(LLMChatClient llmChatClient, int maxSteps, Path workspaceRoot) {
-        this(llmChatClient, maxSteps, workspaceRoot, List.of());
+    public SWEAgent(Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot) {
+        this(chatClientSupplier, maxSteps, workspaceRoot, List.of());
     }
 
     private static List<Object> builtinTools(Path workspaceRoot) {
@@ -76,12 +77,13 @@ public class SWEAgent extends ToolCallAgent {
         return List.of(new BashTool(workspace), new StrReplaceEditor(), new TerminateTool());
     }
 
-    public SWEAgent(LLMChatClient llmChatClient, int maxSteps, Path workspaceRoot, List<Object> mcpTools) {
-        this(llmChatClient, maxSteps, workspaceRoot, mcpTools, List.of());
+    public SWEAgent(
+            Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot, List<Object> mcpTools) {
+        this(chatClientSupplier, maxSteps, workspaceRoot, mcpTools, List.of());
     }
 
     public SWEAgent(
-            LLMChatClient llmChatClient,
+            Supplier<LLMChatClient> chatClientSupplier,
             int maxSteps,
             Path workspaceRoot,
             List<Object> mcpTools,
@@ -93,7 +95,7 @@ public class SWEAgent extends ToolCallAgent {
                         VIEW_WINDOW_LINES, workspaceRoot.toAbsolutePath().normalize()),
                 NEXT_STEP_PROMPT,
                 SESSION_SUMMARY_SYSTEM_PROMPT,
-                llmChatClient,
+                chatClientSupplier,
                 maxSteps,
                 mcpTools,
                 skillsTools,

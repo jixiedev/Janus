@@ -9,6 +9,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 @Slf4j
 @Service
@@ -21,8 +22,9 @@ public class DAService extends ToolCallService {
             @Value("${janus.agent.da.max-steps:10}") int maxSteps,
             @Value("${janus.agent.da.workspace-root:workspace/da}") String workspaceRoot,
             @Value("${janus.agent.default.skills.dir:.agent/default/skills}") String defaultSkillsDir,
-            @Value("${janus.agent.da.skills.dir:.agent/da/skills}") String agentSkillsDir) {
-        super(applicationContext, maxSteps, defaultSkillsDir, agentSkillsDir);
+            @Value("${janus.agent.da.skills.dir:.agent/da/skills}") String agentSkillsDir,
+            @Value("${janus.shell.verbose-thought:true}") boolean verboseThought) {
+        super(applicationContext, maxSteps, defaultSkillsDir, agentSkillsDir, verboseThought);
         this.workspaceRoot = WorkspaceSupport.resolveWorkspaceRoot(workspaceRoot);
     }
 
@@ -33,8 +35,8 @@ public class DAService extends ToolCallService {
     }
 
     @Override
-    protected ToolCallAgent createAgent(LLMChatClient chatClient) {
-        return new DataAnalysisAgent(chatClient, maxSteps, workspaceRoot, mcpTools, skillTools);
+    protected ToolCallAgent createAgent(Supplier<LLMChatClient> chatClientSupplier) {
+        return new DataAnalysisAgent(chatClientSupplier, maxSteps, workspaceRoot, mcpTools, skillTools);
     }
 
 }

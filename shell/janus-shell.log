@@ -47,3 +47,5 @@
 1780384292049:janus request -p "帮我查一下wish的成立过程"
 1780386110852:janus request -p "帮我查一下tencent的成立过程"
 1780387663545:plan request -p "帮我查询wish的成立过程，保存到文件中"
+1780474708185:diagnostic request -p "Airflow DAG DailyCnMongoDataSync 最近有失败的情况，帮我调查"
+1780476186642:diagnostic request -p "Airflow DAG DailyCnMongoDataSync 最近两天有失败的情况，帮我调查出根本原因"
