@@ -14,7 +14,7 @@ Start from the **repository root** so `workspace/*` resolves under the project r
 
 ```bash
 cd /path/to/Janus
-mvn -pl core install -DskipTests
+mvn -pl core,diagnostic install -DskipTests
 mvn -f shell/pom.xml spring-boot:run
 ```
 
@@ -36,6 +36,7 @@ Shared shape for every group:
 | `janus` | General assistant | `workspace/janus` |
 | `da` | Data analysis and charts | `workspace/da` |
 | `swe` | Terminal + file editing | `workspace/swe` |
+| `diagnostic` | Multi-stage incident investigation (COLLECT → ANALYZE → VALIDATE → TERMINATE) | — (MCP on stages) |
 
 | Option | Short | Description |
 |--------|-------|-------------|
@@ -138,6 +139,20 @@ shell:> swe request -p "List workspace layout and suggest how to run shell tests
 ```
 
 Uses `bash` and `str_replace_editor`; the same `-c` keeps one bash session per conversation.
+
+---
+
+## Example: diagnostic (incident investigation)
+
+```text
+shell:> diagnostic request -p "Airflow DAG daily_sales failed at 3am — find root cause" -m sensenova -c incident-1
+```
+
+Multi-stage loop (COLLECT → ANALYZE → VALIDATE → TERMINATE); stages use configured MCP tools when available. Follow-up with the same `-c`:
+
+```text
+shell:> diagnostic request -p "Were any downstream tables affected?" -m sensenova -c incident-1
+```
 
 ---
 

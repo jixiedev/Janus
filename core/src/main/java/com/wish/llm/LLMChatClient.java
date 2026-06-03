@@ -168,7 +168,7 @@ public class LLMChatClient {
         return names;
     }
 
-    static String resolveToolName(Object tool) {
+    public static String resolveToolName(Object tool) {
         if (tool instanceof ToolCallback callback) {
             return callback.getToolDefinition().name();
         }

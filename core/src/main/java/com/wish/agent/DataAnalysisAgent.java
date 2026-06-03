@@ -45,8 +45,8 @@ public class DataAnalysisAgent extends ToolCallAgent {
         this(chatClientSupplier, maxSteps, workspaceRoot, List.of());
     }
 
-    private static List<Object> builtinTools(Path workspaceRoot, LLMChatClient llmChatClient) {
-        ChartLlmConfig chartLlm = ChartLlmConfig.from(llmChatClient);
+    private static List<Object> builtinTools(Path workspaceRoot, Supplier<LLMChatClient> chatClientSupplier) {
+        ChartLlmConfig chartLlm = ChartLlmConfig.from(chatClientSupplier.get());
         return List.of(
                 new DataAnalysisPythonExecuteTool(),
                 new VisualizationPrepareTool(),
@@ -65,17 +65,16 @@ public class DataAnalysisAgent extends ToolCallAgent {
             Path workspaceRoot,
             List<Object> mcpTools,
             List<Object> skillsTools) {
-        LLMChatClient client = chatClientSupplier.get();
         super(
                 NAME,
                 DESCRIPTION,
                 SYSTEM_PROMPT.formatted(workspaceRoot.toAbsolutePath().normalize()),
                 NEXT_STEP_PROMPT,
                 SESSION_SUMMARY_SYSTEM_PROMPT,
-                () -> client,
+                chatClientSupplier,
                 maxSteps,
                 mcpTools,
                 skillsTools,
-                builtinTools(workspaceRoot, client));
+                builtinTools(workspaceRoot, chatClientSupplier));
     }
 }

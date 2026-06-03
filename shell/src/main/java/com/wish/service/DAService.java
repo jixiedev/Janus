@@ -22,8 +22,9 @@ public class DAService extends ToolCallService {
             @Value("${janus.agent.da.max-steps:10}") int maxSteps,
             @Value("${janus.agent.da.workspace-root:workspace/da}") String workspaceRoot,
             @Value("${janus.agent.default.skills.dir:.agent/default/skills}") String defaultSkillsDir,
-            @Value("${janus.agent.da.skills.dir:.agent/da/skills}") String agentSkillsDir) {
-        super(applicationContext, maxSteps, defaultSkillsDir, agentSkillsDir);
+            @Value("${janus.agent.da.skills.dir:.agent/da/skills}") String agentSkillsDir,
+            @Value("${janus.shell.verbose-thought:true}") boolean verboseThought) {
+        super(applicationContext, maxSteps, defaultSkillsDir, agentSkillsDir, verboseThought);
         this.workspaceRoot = WorkspaceSupport.resolveWorkspaceRoot(workspaceRoot);
     }
 

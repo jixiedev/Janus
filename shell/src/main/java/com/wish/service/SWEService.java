@@ -22,8 +22,9 @@ public class SWEService extends ToolCallService {
             @Value("${janus.agent.swe.max-steps:10}") int maxSteps,
             @Value("${janus.agent.swe.workspace-root:workspace/swe}") String workspaceRoot,
             @Value("${janus.agent.default.skills.dir:.agent/default/skills}") String defaultSkillsDir,
-            @Value("${janus.agent.swe.skills.dir:.agent/swe/skills}") String agentSkillsDir) {
-        super(applicationContext, maxSteps, defaultSkillsDir, agentSkillsDir);
+            @Value("${janus.agent.swe.skills.dir:.agent/swe/skills}") String agentSkillsDir,
+            @Value("${janus.shell.verbose-thought:true}") boolean verboseThought) {
+        super(applicationContext, maxSteps, defaultSkillsDir, agentSkillsDir, verboseThought);
         this.workspaceRoot = WorkspaceSupport.resolveWorkspaceRoot(workspaceRoot);
     }
 

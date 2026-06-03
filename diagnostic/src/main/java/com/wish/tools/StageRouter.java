@@ -17,10 +17,13 @@ public class StageRouter {
 
     @Tool(
             name = "router",
-            description = "Choose a stage to proceed. Available stages are COLLECT, ANALYZE, VALIDATE")
-    public void route(
-            @ToolParam(description = "stage name", required = true) String stageName) {
-        Stage stage = Stage.of(stageName);
+            description =
+                    "Choose the next investigation stage. "
+                            + "Values: CLASSIFY, COLLECT, ANALYZE, VALIDATE, TERMINATE, ERROR. "
+                            + "Call exactly once per routing turn.")
+    public String route(@ToolParam(description = "Stage name (e.g. COLLECT, TERMINATE)", required = true) String stageName) {
+        Stage stage = Stage.require(stageName);
         state.enterIntoStage(stage);
+        return "Entered stage: " + stage.getName();
     }
 }

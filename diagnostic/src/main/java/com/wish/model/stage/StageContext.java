@@ -1,46 +1,48 @@
 package com.wish.model.stage;
 
-import java.util.List;
-
-import com.wish.models.context.BaseUserContext;
+import com.wish.models.context.ToolCallUserContext;
+import com.wish.prompt.DiagnosticPrompts;
 import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.lang3.tuple.Pair;
-import org.springframework.ai.chat.messages.Message;
 
-/*
-    contains stage specific context, including
-        - messages in this stage, system, assistant, user...
-        -
+/**
+ * Isolated execution scope for one diagnostic stage.
+ * {@link #backgroundSnapshot} is a frozen copy of the main session at {@link com.wish.model.DiagnosticContext#beginStage()};
+ * stage tool-call history lives only in {@link #baseUserContext} and never writes back except via
+ * {@link #stageFinding} at stage end.
  */
 public class StageContext {
     private final Stage stage;
-
-    /*
-        llm output when calling stageRouter to choose this stage
-     */
     private final String llmThought;
-    private final List<Message> backgroundInformation;
+    /** Main-session snapshot at stage entry; not a live link to main ChatMemory. */
+    private final String backgroundSnapshot;
 
     @Getter
-    private final BaseUserContext baseUserContext;
+    private final ToolCallUserContext baseUserContext;
 
+    @Getter
+    @Setter
+    private String stageFinding = "";
 
-    public StageContext(BaseUserContext baseUserContext, Stage stage, String llmThought, List<Message> backgroundInformation) {
+    public StageContext(
+            ToolCallUserContext baseUserContext,
+            Stage stage,
+            String llmThought,
+            String backgroundSnapshot) {
         this.baseUserContext = baseUserContext;
         this.stage = stage;
         this.llmThought = llmThought;
-        this.backgroundInformation = backgroundInformation;
+        this.backgroundSnapshot =
+                backgroundSnapshot == null || backgroundSnapshot.isBlank()
+                        ? "(no background yet)"
+                        : backgroundSnapshot;
     }
 
-    public List<Message> stageSummary() {
-        return List.of();
-    }
-
-    /*
-        return <SystemPrompt, UserPrompt>
-     */
+    /** @return pair of (systemPrompt, userPrompt) for {@link com.wish.agent.base.BaseAgent#run} */
     public Pair<String, String> prepareStagePrompt() {
-        //todo how to assemble stage prompt, including system prompt, background, llm thought for this stage, user instruction for this stage
-        return Pair.of("", "");
+        String system = stage.getSystemPrompt();
+        String user = DiagnosticPrompts.stageUserPrompt(stage, llmThought, backgroundSnapshot);
+        return Pair.of(system, user);
     }
 }
