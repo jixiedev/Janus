@@ -398,3 +398,211 @@ sequenceDiagram
 - **session-level**：跨轮保留结论与产物路径摘要。
 
 **原则**：将可复用结论写入 **Session**，将 **nextStepPrompt** 等引导性内容限制在 **Context** 内（ephemeral），避免长会话被步骤噪声污染。
+
+---
+
+## Prompt 设计与优化策略
+
+Janus 的提示词遵循 [Prompt Engineering Guide — Examples of Prompts](https://www.promptingguide.ai/introduction/examples.en#text-summarization) 中的结构化写法，并在工程上兼顾 **prefix cache** 与 **session memory** 约束。
+
+### 结构化要素
+
+每条提示尽量拆成清晰区块，避免把「身份、任务、背景、格式、约束」混在一段自然语言里：
+
+| 区块 | 用途 | 典型位置 |
+|------|------|----------|
+| **Role** | 角色与领域（role prompting） | System prompt 开头 |
+| **Instruction** | 本步要做什么 | System / User / nextStep |
+| **Context** | 只读背景（历史、进度、plan 状态） | User message |
+| **Input** | 待处理的具体内容（用户原文、trace、snapshot） | User message |
+| **Output** | 期望交付物或工具调用方式 | System prompt；摘要类 User 末尾加 `Summary:` |
+| **Rules** | 语言、禁止臆造、工具约束、收敛规则 | System / nextStep |
+
+**Question Answering** 模式（Context + Question + `Answer:`）与 **Text Summarization** 模式（Instruction + Input + `Summary:`）在 session 摘要、计划收尾等场景中有对应应用。
+
+示例（session 摘要 system prompt）：
+
+```text
+Instruction: Summarize one completed agent task for long-term session memory.
+Input: User request and agent trace will follow in the user message.
+Output: Write 2-5 concise sentences covering:
+- What was requested
+- What was done
+- The outcome
+Rules: Use the same language as the user's request. Do not include raw logs or stack traces.
+```
+
+示例（摘要 user message，见 `PromptRunSummarizer`）：
+
+```text
+Instruction: Summarize this completed agent run for session memory using the system rules above.
+
+Context — user request:
+...
+
+Context — agent trace:
+...
+
+Summary:
+```
+
+### 提示词分层
+
+| 类型 | 生命周期 | 定义位置 | 说明 |
+|------|----------|----------|------|
+| **systemPrompt（S）** | 每轮 request 固定 | 各 Agent 类、`DiagnosticPrompts`、`Stage` enum | Role + Instruction + Output/Rules |
+| **primary user request（U₀）** | 本轮任务 | CLI `-p` / API request | 用户当前意图，置于 prefix 最前 |
+| **trailing user blocks** | 本轮可变背景 | `PromptPrefixLayout.build(..., trailingUserBlocks)` | 诊断路由 snapshot、阶段 background 等 |
+| **nextStepPrompt（Uₙ）** | **ephemeral** | 各 Agent `NEXT_STEP_PROMPT`、`Stage.nextStepPrompt()` | 引导单步动作，默认不落 session |
+| **session summary prompt** | 跨轮持久 | `sessionSummarySystemPrompt()`、`DiagnosticPrompts.SESSION_SUMMARY_SYSTEM` | 由 `PromptRunSummarizer` 压缩为一轮 2 条摘要 |
+
+**原则**：
+
+- 稳定、可缓存的文案放 **前缀**；随请求变化的数据放 **后缀**（见下节）。
+- 面向用户的最终答案优先经 **`create_chat_completion`**（Janus / tool-call）或 **`submit_stage_finding`**（诊断）交付，再在后续 step **`terminate`**。
+- 分类类任务（如 `classify_incident`）在 Instruction 中明确 **标签语义**；必要时可在 CLASSIFY 阶段增加 few-shot 示例以固定输出格式（与 Guide 中 sentiment 示例同理）。
+
+### Prefix 顺序与 Prompt Cache
+
+`PromptPrefixLayout` 统一多轮对话前缀顺序，便于模型 **prefix cache** 命中：
+
+```text
+S → U₀（当前任务）→ trailing user blocks → session framing → 历史摘要消息 → A/T（step loop 追加）
+```
+
+```mermaid
+flowchart LR
+    S[System S] --> U0[U₀ 当前任务]
+    U0 --> TB[trailing blocks]
+    TB --> FR[session framing]
+    FR --> H[历史摘要]
+    H --> AT[Aₙ / Tₙ step]
+```
+
+- **当前任务紧贴 S**：同 session 内多次 request 时，system + 任务指令前缀尽量不变，仅尾部 snapshot / 历史变化。
+- **SESSION_HISTORY_FRAMING**：插在历史摘要前，用 Instruction/Context 声明「上文是当前任务，下文是背景」，避免续聊时把旧摘要当成新指令。
+- 诊断模块中，`DiagnosticPrompts.routeStageUserPrompt` 将 **稳定路由指令置前**、**main session snapshot 置后**，与上述策略一致。
+
+实现：`core/src/main/java/com/wish/models/context/PromptPrefixLayout.java`。
+
+### 诊断模块（diagnostic）
+
+诊断流程与单 Agent `run` 不同：由 **Router + 多 Stage** 协作，并在 **三个隔离 Context** 中组装提示词。实现见 `diagnostic/` 模块；CLI 用法见 [shell/docs/SHELL.md](../../shell/docs/SHELL.md#案例事故调查diagnostic)。
+
+#### 三层 Context 与提示词职责
+
+| Context | 存储 | System（S） | 主要 User 内容 | 是否跨 step 持久 |
+|---------|------|-------------|----------------|------------------|
+| **Main session** | `DiagnosticContext.mainSession` | `DIAGNOSTIC_SYSTEM` | `initialIncidentPrompt`（U₀）+ 各阶段 `stageFindingMessage` | 写入 **Session** 摘要与 incident 报告 |
+| **Router** | `routeChatMemory`（独立 partition） | `ROUTER_SYSTEM` | 每轮 `routeStageUserPrompt` | **仅本轮 run**；`cleanupRun()` 清除 |
+| **Stage** | `stageChatMemory`（每阶段新 partition） | `Stage.systemPrompt` | `stageTaskUserPrompt` + `stageBackgroundUserPrompt`（trailing） | **仅本阶段**；`endStage()` 清除 |
+
+**边界原则**（见 `DiagnosticContext`）：
+
+- Stage 内 tool trace **不回写** main session，仅通过 **`submit_stage_finding`** 将阶段结论贡献给主会话。
+- Router 读取的 `mainSessionSnapshot` 是 **边界拷贝**，不进入 stage 的 ChatMemory。
+- 多轮 `-c` 时，prior turns 经 `PromptPrefixLayout` hydrate 到 main session **尾部**（framing 之后），与 core Agent 续聊策略一致。
+
+#### 调查循环与消息流
+
+```mermaid
+flowchart TB
+    IN[用户 incident -p] --> BOOT[bootstrapMainSession]
+    BOOT --> LOOP{shouldContinue?}
+    LOOP -->|是| RT[Router: ROUTER_SYSTEM + routeStageUserPrompt]
+    RT -->|router 工具| STG[Stage: Stage.systemPrompt + task + background]
+    STG -->|submit_stage_finding| FIND[contributeStageFinding → mainSession]
+    FIND --> LOOP
+    LOOP -->|否 TERMINATE/ERROR| OUT[buildRunResult]
+    OUT --> SUM[endPrompt: SESSION_SUMMARY + incident 归档]
+```
+
+单阶段内 prefix 顺序（`StageProcessor` + `ToolCallAgent.run`）：
+
+```text
+S（Stage.systemPrompt）→ U₀（stageTaskUserPrompt）→ trailing（stageBackgroundUserPrompt）→ Uₙ/A/T（step loop）
+```
+
+与全局策略相同：**阶段任务指令（task）在前、可变 background snapshot 在后**，便于同一 stage 多 step 时 prefix cache 命中。
+
+#### `DiagnosticPrompts` 常量
+
+| 常量 | 用途 |
+|------|------|
+| `DIAGNOSTIC_SYSTEM` | Main session 协调者角色；区分 problem type vs root cause |
+| `ROUTER_SYSTEM` | 阶段路由；仅允许调用 `router` 工具 |
+| `routeStageUserPrompt` | 每轮路由 user 消息（progress + snapshot） |
+| `initialIncidentPrompt` | 首次 incident 格式化为 U₀ |
+| `stageTaskUserPrompt` / `stageBackgroundUserPrompt` | 阶段任务与只读背景拆分 |
+| `stageFindingMessage` | 阶段结论写回 main session 的 UserMessage 模板 |
+| `SESSION_SUMMARY_SYSTEM` | 多轮 Session 压缩（`DiagnosticSession`） |
+| `INCIDENT_REPORT_SUMMARY_SYSTEM` | 单次调查归档报告（`IncidentReportArchiver`） |
+
+结构化工具名（Output 交付约定）：
+
+| 工具 | 阶段 | 含义 |
+|------|------|------|
+| `router` | Router | 选择下一 `Stage` |
+| `classify_incident` | CLASSIFY | **问题类型**（symptom，非根因）；enum 见 `IncidentCategory.catalogForPrompt()` |
+| `classify_root_cause` | COLLECT 及之后 | **根因**；可随证据更新；enum 见 `IncidentRootCause.catalogForPrompt()` |
+| `submit_stage_finding` | 各 Stage | 阶段可见产出（等同 Janus 的 `create_chat_completion`） |
+| `terminate` | 各 Stage | 结束本阶段 agent run |
+
+`StageToolCallAgent` 将 `directSessionResultTool` 设为 `submit_stage_finding`，摘要器优先取其输出，而非 assistant 正文。
+
+#### 阶段（Stage）提示词
+
+每个 `Stage` enum 定义两类提示：
+
+| 类型 | 方法/字段 | 说明 |
+|------|-----------|------|
+| **阶段 system** | `Stage.systemPrompt` | Role + Instruction + Rules + Output（如 CLASSIFY 强调「分 problem type，不分 root cause」） |
+| **单步 nextStep** | `Stage.nextStepPrompt()` | Ephemeral；约束「本 turn 一个动作」及 `submit_stage_finding` → `terminate` 顺序 |
+
+阶段顺序（Router 选择）：`INITIAL → CLASSIFY → COLLECT → ANALYZE → VALIDATE → TERMINATE | ERROR`。
+
+**分类提示设计要点**（对应 Guide 中 classification 范例）：
+
+- **Problem type** 与 **root cause** 分阶段、分工具，避免 CLASSIFY 阶段过早归因。
+- enum 目录嵌入 Instruction（`Allowed problem types:` / `Allowed root causes:`），必要时可在 CLASSIFY 增加 few-shot 固定标签格式。
+
+#### 摘要与归档（双 Summarizer）
+
+| 路径 | System prompt | 触发 | 产出 |
+|------|---------------|------|------|
+| Session 续聊 | `SESSION_SUMMARY_SYSTEM` | `DiagnosticSession.endPrompt` | ChatMemory 中 2 条摘要 / 轮 |
+| Incident 归档 | `INCIDENT_REPORT_SUMMARY_SYSTEM` | `IncidentReportArchiver.archiveRun` | `~/.janus/diagnostic-reports/` 下 `.md` / `.json` |
+
+两者均通过 `PromptRunSummarizer` 生成；输入为 `getPromptMessagesForSummary()`（main session 本轮增量）+ run result，user 消息采用 **Instruction → Context → `Summary:`** 结构。
+
+#### 修改诊断提示词时
+
+1. 路由类文案改 `DiagnosticPrompts`；阶段行为改 `Stage` enum 或 `Stage.nextStepPrompt()`。
+2. 保持 **snapshot / background 在 user 消息尾部**，并标注 `read-only`。
+3. 阶段结论必须经 **`submit_stage_finding`**，不要依赖 assistant-only 文本进入 main session。
+4. 跑 `diagnostic` 模块测试；core 侧 `PromptPrefixLayoutTest` 仍覆盖 shared prefix 逻辑。
+
+### 代码中的提示词入口
+
+| 场景 | 主要文件 |
+|------|----------|
+| 通用 / Janus / SWE / DA Agent | `core/.../agent/*.java`、`ToolCallAgent.java` |
+| 规划 Flow | `core/.../flow/PlanningFlow.java` |
+| Session 摘要 | `PromptRunSummarizer.java` + 各 Agent 的 `SESSION_SUMMARY_*` |
+| 诊断主流程 / 路由 / 阶段文案 | `diagnostic/.../prompt/DiagnosticPrompts.java`、`model/stage/Stage.java` |
+| 诊断 Context 边界与 main session | `diagnostic/.../model/DiagnosticContext.java` |
+| 诊断执行循环 | `diagnostic/.../loop/DiagnosticAgent.java`、`StageProcessor.java`、`StageToolCallAgent.java` |
+| 诊断 Session / 报告归档 | `diagnostic/.../models/session/DiagnosticSession.java`、`models/report/IncidentReportArchiver.java` |
+
+新增或修改提示词时：
+
+1. 采用 **Role → Instruction → Output/Rules**（system）或 **Instruction → Context/Input → Summary:**（user 摘要）。
+2. 保持 **U₀ 简短明确**；大段只读材料放入 trailing block 或 Context 段，并标注 `read-only`。
+3. **nextStepPrompt** 只写「本步一条最佳动作」，收敛规则（如「已 create_chat_completion 则仅 terminate」）放在 Rules。
+4. 修改后跑相关测试：`PromptPrefixLayoutTest`、`AgentSessionSummaryPromptTest`、`PromptRunSummarizerTest` 等；诊断见 `diagnostic` 模块测试。
+
+### 与 Memory 的协同
+
+- **写入 Session 的**：每轮压缩后的 user request + agent result（及诊断 incident report），不是完整 step trace。
+- **不写入 Session 的**：`nextStepPrompt`、路由/阶段内的 ephemeral 引导、原始 tool 日志（摘要 Rules 中要求省略）。
+- 续聊歧义（把「继续」或系统 framing 当新任务）优先检查 session 是否过期；必要时 `clear-session`。见 [FAQ.md](../../docs/FAQ.md)。

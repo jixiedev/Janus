@@ -1,11 +1,11 @@
 package com.wish.model;
 
 import com.wish.models.context.BaseUserContext;
+import com.wish.models.context.PromptPrefixLayout;
 import com.wish.models.context.ToolCallUserContext;
 import com.wish.model.stage.Stage;
 import com.wish.model.stage.StageContext;
 import com.wish.model.state.State;
-import com.wish.models.session.Session;
 import com.wish.prompt.DiagnosticPrompts;
 import lombok.Getter;
 import lombok.Setter;
@@ -13,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.ArrayList;
@@ -29,7 +28,7 @@ import java.util.UUID;
  *   <li><b>Stage</b> ({@link #stageChatMemory}) — isolated per stage; cleared in {@link #endStage()}</li>
  * </ul>
  * Cross-boundary: {@link #snapshotMainSession()} at stage start; {@link #contributeStageFinding} at stage end.
- * Multi-turn: prior turns live in {@link Session} memory; {@link #hydratePriorSession} copies them into {@link #mainSession} once per run.
+ * Multi-turn: prior turns are assembled into {@link #mainSession} via {@link #bootstrapMainSession}.
  */
 @Slf4j
 public class DiagnosticContext {
@@ -73,7 +72,6 @@ public class DiagnosticContext {
         this.currentState = currentState;
         this.routeChatMemory = MessageWindowChatMemory.builder().build();
         this.stageChatMemory = MessageWindowChatMemory.builder().build();
-        mainSession.add(new SystemMessage(DiagnosticPrompts.DIAGNOSTIC_SYSTEM));
     }
 
     public static DiagnosticContext forRun(String contextId, String sessionId) {
@@ -84,34 +82,27 @@ public class DiagnosticContext {
     public static DiagnosticContext createEphemeral(String rawRequest) {
         String contextId = UUID.randomUUID().toString();
         DiagnosticContext context = new DiagnosticContext(contextId, null, new State());
-        context.beginCurrentIncident(rawRequest);
+        context.bootstrapMainSession(DiagnosticPrompts.DIAGNOSTIC_SYSTEM, List.of(), rawRequest);
         return context;
     }
 
     /**
-     * Copies summarized prior turns from {@link Session#getSessionMemoryKey()} into the main session.
+     * Builds the main-session prefix via {@link PromptPrefixLayout}.
+     * Optimization: system and current incident precede prior session summaries.
      *
-     * @return number of hydrated session messages (excluding framing)
+     * @param rawRequest shell/API incident text (formatted for the model internally)
+     * @return number of bound session messages (excluding framing)
      */
-    public int hydratePriorSession(List<Message> sessionMessages) {
-        if (sessionMessages == null || sessionMessages.isEmpty()) {
-            promptRunStartIndex = mainSession.size();
-            return 0;
-        }
-        mainSession.add(new UserMessage(Session.SESSION_HISTORY_FRAMING_PROMPT));
-        int hydrated = 0;
-        for (Message message : sessionMessages) {
-            mainSession.add(message);
-            hydrated++;
-        }
-        promptRunStartIndex = mainSession.size();
-        return hydrated;
-    }
-
-    /** Appends the current user request for this prompt run. */
-    public void beginCurrentIncident(String rawRequest) {
+    public int bootstrapMainSession(String systemPrompt, List<Message> sessionMessages, String rawRequest) {
         this.rawRequest = rawRequest == null ? "" : rawRequest.trim();
-        mainSession.add(new UserMessage(DiagnosticPrompts.initialIncidentPrompt(this.rawRequest)));
+        List<Message> bound =
+                sessionMessages == null || sessionMessages.isEmpty() ? List.of() : List.copyOf(sessionMessages);
+        String userRequest = DiagnosticPrompts.initialIncidentPrompt(this.rawRequest);
+        List<Message> prefix = PromptPrefixLayout.build(systemPrompt, bound, userRequest);
+        mainSession.clear();
+        mainSession.addAll(prefix);
+        promptRunStartIndex = prefix.size();
+        return bound.size();
     }
 
     public List<Message> getMainSession() {
@@ -188,7 +179,7 @@ public class DiagnosticContext {
     public BaseUserContext getRouteStageContext() {
         if (routeStageContext == null) {
             routeStageContext = new BaseUserContext(ROUTE_CONVERSATION_PREFIX + contextId, sessionId, routeChatMemory);
-            routeStageContext.ensureSystemPrompt(DiagnosticPrompts.ROUTER_SYSTEM);
+            routeStageContext.initializePromptPrefix(DiagnosticPrompts.ROUTER_SYSTEM, "");
         }
         return routeStageContext;
     }

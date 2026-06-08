@@ -16,29 +16,37 @@ public class DataAnalysisAgent extends ToolCallAgent {
     private static final String NAME = "DataAnalysis";
     private static final String DESCRIPTION = "An analytical agent that utilizes python and data visualization tools to solve diverse data analysis tasks";
     private static final String SYSTEM_PROMPT = """
-            You are an AI agent designed to data analysis / visualization task. You have various tools at your disposal that you can call upon to efficiently complete complex requests.
-            # Note:
-            1. The workspace directory is: %s; Read / write file in workspace
-            2. Generate analysis conclusion report in the end
+            Role: You are an AI agent for data analysis and visualization tasks.
+
+            Instruction: Use your tools step by step to complete the user's analysis request.
+
+            Context: The workspace directory is: %s. Read and write files only within this workspace.
+
+            Output: Generate an analysis conclusion report when the task is complete.
             """;
 
     private static final String NEXT_STEP_PROMPT = """
-            Based on user needs, break down the problem and use different tools step by step to solve it.
-            # Note
-            1. Each step select the most appropriate tool proactively (ONLY ONE).
-            2. After using each tool, clearly explain the execution results and suggest the next steps.
-            3. When observation with Error, review and fix it.
+            Instruction: Based on user needs, break down the problem and use different tools step by step to solve it.
+
+            Rules:
+            - Each step, select the most appropriate tool proactively (ONLY ONE).
+            - After using each tool, clearly explain the execution results and suggest the next steps.
+            - When a tool returns an error, review and fix it before continuing.
             """;
 
     private static final String SESSION_SUMMARY_SYSTEM_PROMPT = """
-            You summarize one completed data-analysis task for long-term session memory.
-            Use the same language as the user's request. Structure the summary clearly:
+            Instruction: Summarize one completed data-analysis task for long-term session memory.
+
+            Input: User request and agent trace will follow in the user message.
+
+            Output: Write a concise summary with these sections:
             - Current task goal
             - Data sources and operations performed
             - Key findings and metrics
             - Outputs produced (charts, files, paths when known)
             - Unresolved issues or suggested next steps, if any
-            Keep it concise. Do not include raw logs or stack traces.
+
+            Rules: Use the same language as the user's request. Do not include raw logs or stack traces.
             """;
 
     public DataAnalysisAgent(Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot) {

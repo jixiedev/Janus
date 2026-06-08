@@ -1,18 +1,19 @@
 package com.wish.models.context;
 
+import com.wish.support.ConversationLlmUsage;
 import lombok.Getter;
 import lombok.Setter;
-import com.wish.support.Utils;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatResponse;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.List;
 
 @Getter
 public class Context {
-    public static final String DEFAULT_USAGE_TAG = "default";
+
+    /** @see ConversationLlmUsage#DEFAULT_TAG */
+    public static final String DEFAULT_USAGE_TAG = ConversationLlmUsage.DEFAULT_TAG;
 
     protected final String conversation;
 
@@ -21,13 +22,22 @@ public class Context {
 
     protected final ChatMemory chatMemory;
 
-    private final TokenUsageCounter tokenUsage;
-    private final Map<String, TokenUsageCounter> tokenUsageByTag;
+    protected final ConversationLlmUsage llmUsage = new ConversationLlmUsage();
 
-    /** Messages copied from session memory at prompt start; skipped on {@link com.wish.models.session.Session#endPrompt}. */
+    /**
+     * Summarized prior turns bound at {@link #beginPrompt} for the next prefix assembly.
+     * Optimization: session content is supplied here; ordering is applied in {@link #initializePromptPrefix}.
+     */
+    private List<Message> boundSessionMessages = List.of();
+
+    /**
+     * Start index in chat memory for the current prompt run (set by {@link #initializePromptPrefix}).
+     * Skipped by {@link com.wish.models.session.Session#endPrompt} summarization via
+     * {@link BaseUserContext#getPromptMessages()}.
+     */
     @Getter
     @Setter
-    private int sessionHydrationMessageCount;
+    private int promptRunStartIndex;
 
     /** Original shell/API request for this prompt run. */
     @Getter
@@ -47,8 +57,42 @@ public class Context {
         this.conversation = conversation;
         this.sessionId = sessionId;
         this.chatMemory = chatMemory;
-        this.tokenUsage = new TokenUsageCounter();
-        this.tokenUsageByTag = new LinkedHashMap<>();
+    }
+
+    /**
+     * Binds prior session summaries for this prompt run (typically from {@link com.wish.models.session.Session}).
+     */
+    public void bindSessionMessages(List<Message> sessionMessages) {
+        boundSessionMessages =
+                sessionMessages == null || sessionMessages.isEmpty()
+                        ? List.of()
+                        : List.copyOf(sessionMessages);
+    }
+
+    protected List<Message> getBoundSessionMessages() {
+        return boundSessionMessages;
+    }
+
+    /**
+     * Loads the prompt prefix into {@link #chatMemory} using {@link PromptPrefixLayout}.
+     * Optimization: single entry point for system / current task / session ordering.
+     *
+     * @param trailingUserBlocks variable user text after the primary task, before session history
+     */
+    public void initializePromptPrefix(
+            String systemPrompt, String primaryUserRequest, List<String> trailingUserBlocks) {
+        List<Message> prefix =
+                PromptPrefixLayout.build(
+                        systemPrompt, boundSessionMessages, primaryUserRequest, trailingUserBlocks);
+        chatMemory.clear(conversation);
+        if (!prefix.isEmpty()) {
+            chatMemory.add(conversation, prefix);
+        }
+        promptRunStartIndex = prefix.size();
+    }
+
+    public void initializePromptPrefix(String systemPrompt, String primaryUserRequest) {
+        initializePromptPrefix(systemPrompt, primaryUserRequest, List.of());
     }
 
     public void onResponse(ChatResponse chatResponse) {
@@ -56,61 +100,11 @@ public class Context {
     }
 
     public void onResponse(ChatResponse chatResponse, String usageTag) {
-        Usage usage = chatResponse.getMetadata().getUsage();
-        long prompt = usage.getPromptTokens();
-        long completion = usage.getCompletionTokens();
-        long total = usage.getTotalTokens();
-        this.tokenUsage.add(prompt, completion, total);
-
-        String normalizedTag = Utils.trimToDefault(usageTag, DEFAULT_USAGE_TAG);
-        tokenUsageByTag
-                .computeIfAbsent(normalizedTag, key -> new TokenUsageCounter())
-                .add(prompt, completion, total);
+        llmUsage.record(chatResponse, usageTag);
     }
 
-    public TokenUsageCounter getTokenUsage() {
-        return tokenUsage.copy();
-    }
-
-    public Map<String, TokenUsageCounter> getTokenUsageDetails() {
-        Map<String, TokenUsageCounter> details = new LinkedHashMap<>();
-        tokenUsageByTag.forEach((tag, usage) -> details.put(tag, usage.copy()));
-        return Map.copyOf(details);
-    }
-
-    @Getter
-    public static final class TokenUsageCounter {
-        private long promptTokens;
-        private long completionTokens;
-        private long totalTokens;
-
-        public TokenUsageCounter add(long promptTokens, long completionTokens, long totalTokens) {
-            this.promptTokens += promptTokens;
-            this.completionTokens += completionTokens;
-            this.totalTokens += totalTokens;
-            return this;
-        }
-
-        public TokenUsageCounter add(TokenUsageCounter usage) {
-            if (usage == null) {
-                return this;
-            }
-            return add(usage.promptTokens, usage.completionTokens, usage.totalTokens);
-        }
-
-        public TokenUsageCounter subtract(TokenUsageCounter usage) {
-            if (usage == null) {
-                return copy();
-            }
-            return new TokenUsageCounter()
-                    .add(
-                            this.promptTokens - usage.promptTokens,
-                            this.completionTokens - usage.completionTokens,
-                            this.totalTokens - usage.totalTokens);
-        }
-
-        public TokenUsageCounter copy() {
-            return new TokenUsageCounter().add(promptTokens, completionTokens, totalTokens);
-        }
+    /** Immutable view of token and prompt-cache usage accumulated on this context partition. */
+    public ConversationLlmUsage snapshotLlmUsage() {
+        return llmUsage.snapshot();
     }
 }

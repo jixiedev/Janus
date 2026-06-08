@@ -1,6 +1,7 @@
 package com.wish.models.context;
 
 import com.wish.agent.base.BaseAgent;
+import com.wish.support.ConversationLlmUsage;
 import lombok.Getter;
 import org.springframework.ai.chat.memory.ChatMemory;
 
@@ -9,7 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 @Getter
-public class BaseFlowUserContext extends Context{
+public class BaseFlowUserContext extends Context {
     private final Map<BaseAgent, BaseUserContext> flowContext = new HashMap<>();
 
     public BaseFlowUserContext(String conversation, ChatMemory chatMemory) {
@@ -45,11 +46,13 @@ public class BaseFlowUserContext extends Context{
     }
 
     @Override
-    public TokenUsageCounter getTokenUsage() {
-        TokenUsageCounter usage = new TokenUsageCounter();
+    public ConversationLlmUsage snapshotLlmUsage() {
+        ConversationLlmUsage[] parts = new ConversationLlmUsage[flowContext.size() + 1];
+        parts[0] = super.snapshotLlmUsage();
+        int i = 1;
         for (BaseUserContext context : flowContext.values()) {
-            usage.add(context.getTokenUsage());
+            parts[i++] = context.snapshotLlmUsage();
         }
-        return usage;
+        return ConversationLlmUsage.merge(parts);
     }
 }

@@ -113,7 +113,7 @@ public class PlanningFlowService {
 
     private String runEphemeral(PlanningFlow planningFlow, String prompt) {
         String contextId = "ephemeral:" + UUID.randomUUID();
-        PlanningFlowUserContext planningFlowUserContext = new PlanningFlowUserContext(contextId, chatMemory);
+        PlanningFlowUserContext planningFlowUserContext = new PlanningFlowUserContext(contextId, chatMemory, prompt);
         try {
             String result = AgentRunSupport.runWithTokenLogging(
                     planningFlowUserContext, () -> planningFlow.execute(planningFlowUserContext, prompt));

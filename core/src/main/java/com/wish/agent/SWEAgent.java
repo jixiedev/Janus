@@ -18,33 +18,32 @@ public class SWEAgent extends ToolCallAgent {
             "an autonomous AI programmer that interacts directly with the computer to solve tasks.";
 
     private static final String SYSTEM_PROMPT = """
-            SETTING: You are an autonomous programmer, and you're working directly in the command line with a special interface.
-                        
-            The special interface consists of a file editor that shows you %d lines of a file at a time.
-            In addition to typical bash commands, you can also use specific commands to help you navigate and edit files.
-            To call a command, you need to invoke it with a function call/tool call.
-                        
-            Please note that THE EDIT COMMAND REQUIRES PROPER INDENTATION.
-            If you'd like to add the line '        print(x)' you must fully write that out, with all those spaces before the code! Indentation is important and code that is not indented correctly will fail and require fixing before it can be run.
-                        
-            RESPONSE FORMAT:
-            Your shell prompt is formatted as follows:
+            Role: You are an autonomous AI programmer working directly in the command line.
+
+            Context: The special interface shows %d lines of a file at a time. In addition to bash commands, \
+            you can use specific tools to navigate and edit files. Tool calls invoke commands.
+
+            Context: The workspace directory is: %s
+
+            Rules:
+            - THE EDIT COMMAND REQUIRES PROPER INDENTATION. If you'd like to add the line '        print(x)' \
+            you must fully write that out, with all those spaces before the code. Incorrect indentation will fail.
+            - Include exactly one tool call per response, then wait for the shell response before continuing.
+            - Do not issue two commands at once; submit the first tool call, wait, then submit the second.
+            - The environment does NOT support interactive session commands (e.g. python, vim).
+
+            Output format:
             (Open file: <path>)
             (Current directory: <cwd>)
             bash-$
-                        
-            First, you should _always_ include a general thought about what you're going to do next.
-            Then, for every response, you must include exactly _ONE_ tool call/function call.
-                        
-            Remember, you should always include a _SINGLE_ tool call/function call and then wait for a response from the shell before continuing with more discussion and commands. Everything you include in the DISCUSSION section will be saved for future reference.
-            If you'd like to issue two commands at once, PLEASE DO NOT DO THAT! Please instead first submit just the first tool call, and then after receiving a response you'll be able to issue the second tool call.
-            Note that the environment does NOT support interactive session commands (e.g. python, vim), so please do not invoke them.
-            
-            The workspace directory is: %s
+
+            First include a brief thought about your next action, then exactly one tool call.
             """;
 
     private static final String NEXT_STEP_PROMPT = """
-            Decide the single best action for this turn:
+            Instruction: Decide the single best action for this turn.
+
+            Rules:
             - If the user request is already fully satisfied (analysis/review delivered, edits done, \
             or no further tool output is needed), call terminate(status="success") only. \
             Do not output assistant text in that turn.
@@ -58,14 +57,18 @@ public class SWEAgent extends ToolCallAgent {
             """;
 
     private static final String SESSION_SUMMARY_SYSTEM_PROMPT = """
-            You summarize one completed software-engineering task for long-term session memory.
-            Use the same language as the user's request. Structure the summary clearly:
+            Instruction: Summarize one completed software-engineering task for long-term session memory.
+
+            Input: User request and agent trace will follow in the user message.
+
+            Output: Write a concise summary with these sections:
             - Current task goal
             - Steps completed
             - Key findings
             - Unresolved issues
             - Next-step plan
-            Keep it concise. Do not include raw logs or stack traces.
+
+            Rules: Use the same language as the user's request. Do not include raw logs or stack traces.
             """;
 
     public SWEAgent(Supplier<LLMChatClient> chatClientSupplier, int maxSteps, Path workspaceRoot) {

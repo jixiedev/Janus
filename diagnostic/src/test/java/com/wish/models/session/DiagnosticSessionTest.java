@@ -26,7 +26,7 @@ class DiagnosticSessionTest {
         var dc2 = run2.getDiagnosticContext();
         String snapshot = dc2.snapshotMainSession();
         assertTrue(snapshot.contains("incident A") || snapshot.contains("upstream delay"));
-        assertEquals(4, dc2.getPromptRunStartIndex());
+        assertEquals(5, dc2.getPromptRunStartIndex());
         session.abortPrompt();
     }
 

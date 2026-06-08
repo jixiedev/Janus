@@ -30,9 +30,11 @@ import java.util.regex.Pattern;
 public class PlanningFlow extends BaseFlow {
 
     private static final String INITIAL_PLAN_SYSTEM_PROMPT = """
-            You are a planning assistant. Create a concise, actionable plan with clear steps.
-            Focus on key milestones rather than detailed sub-steps.
-            Optimize for clarity and efficiency.
+            Role: You are a planning assistant.
+
+            Instruction: Create a concise, actionable plan with clear steps.
+
+            Rules: Focus on key milestones rather than detailed sub-steps. Optimize for clarity and efficiency.
             """;
 
     private static final String INITIAL_AGENT_DESC_PROMPT_FORMAT = """
@@ -43,30 +45,37 @@ public class PlanningFlow extends BaseFlow {
             """;
 
     private static final String INITIAL_REQUEST_PROMPT_FORMAT = """
-            Create a reasonable plan with clear steps to accomplish the task: %s
-            Use plan_id '%s' when calling the planning tool.
+            Instruction: Create a reasonable plan with clear steps to accomplish the task below.
+            Use plan_id '%2$s' when calling the planning tool.
+
+            Input:
+            %1$s
             """;
 
     private static final String FINALIZE_PLAN_SYSTEM_PROMPT = """
-            You are a planning assistant. Your task is to summarize the completed plan.
+            Role: You are a planning assistant.
+
+            Instruction: Summarize the completed plan based on the final status provided in the user message.
+
+            Output: Describe what was accomplished and any final thoughts.
             """;
 
     private static final String FINALIZE_PLAN_USER_PROMPT_FORMAT = """
-            The plan has been completed. Here is the final plan status:
-            
+            Instruction: Summarize the completed plan using the system rules above.
+
+            Context — final plan status:
             %s
-            
-            Please provide a summary of what was accomplished and any final thoughts.
+
+            Summary:
             """;
 
     private static final String STEP_EXECUTION_PROMPT_FORMAT = """
-            CURRENT PLAN STATUS:
+            Context — current plan status:
             %s
-            
-            YOUR CURRENT TASK:
-            You are now working on step %d: "%s"
-            
-            Please only execute this current step using the appropriate tools. When you're done, provide a summary of what you accomplished.
+
+            Instruction: Execute only step %d: "%s" using the appropriate tools.
+
+            Output: When this step is complete, provide a summary of what you accomplished.
             """;
 
     private static final String PLAN_SECTION_HEADER = "=== Plan ===";
@@ -240,9 +249,8 @@ public class PlanningFlow extends BaseFlow {
 
         String systemPrompt = buildPlanningSystemPrompt();
         BaseUserContext planningContext = context.getInitializeContext();
-        // Session hydration may already have user/assistant turns; keep one leading system message.
-        planningContext.ensureSystemPrompt(systemPrompt);
-        planningContext.addMemory(new UserMessage(INITIAL_REQUEST_PROMPT_FORMAT.formatted(request, planId)));
+        planningContext.initializePromptPrefix(
+                systemPrompt, INITIAL_REQUEST_PROMPT_FORMAT.formatted(request, planId));
 
         Pair<ChatResponse, Prompt> response = llmChatClient.askWithTools(planningContext, List.of(), List.of());
         AssistantMessage assistantMessage = response.getKey().getResult().getOutput();
@@ -302,8 +310,8 @@ public class PlanningFlow extends BaseFlow {
 
         try {
             BaseUserContext planningContext = context.getFinalizeContext();
-            planningContext.ensureSystemPrompt(FINALIZE_PLAN_SYSTEM_PROMPT);
-            planningContext.addMemory(new UserMessage(FINALIZE_PLAN_USER_PROMPT_FORMAT.formatted(planText)));
+            planningContext.initializePromptPrefix(
+                    FINALIZE_PLAN_SYSTEM_PROMPT, FINALIZE_PLAN_USER_PROMPT_FORMAT.formatted(planText));
             Pair<ChatResponse, Prompt> response = llmChatClient.askWithTools(planningContext, List.of(), List.of());
             String summary = response.getKey().getResult().getOutput().getText();
             context.finalizePlan();

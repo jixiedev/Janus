@@ -97,11 +97,15 @@ public class PromptRunSummarizer {
         String trace = formatTrace(promptMessages, runResult);
         String userContent =
                 """
-                User request:
+                Instruction: Summarize this completed agent run for session memory using the system rules above.
+
+                Context — user request:
                 %s
 
-                Agent trace:
+                Context — agent trace:
                 %s
+
+                Summary:
                 """
                         .formatted(userRequest, trace);
 

@@ -1,12 +1,10 @@
 package com.wish.models.session;
 
-import com.wish.models.context.BaseUserContext;
 import com.wish.models.context.Context;
+import com.wish.models.context.PromptPrefixLayout;
 import lombok.Getter;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,11 +22,8 @@ public abstract class Session<T extends Context> {
     public static final String SESSION_KEY_PREFIX = "session:";
     public static final String CONTEXT_KEY_PREFIX = "context:";
 
-    /** Inserted after hydrated session summaries so the model treats them as background, not the current task. */
-    public static final String SESSION_HISTORY_FRAMING_PROMPT = """
-            The messages above are summarized prior turns in this session (background only).
-            The current task is provided in a later user message in this conversation.
-            """;
+    /** @see com.wish.models.context.PromptPrefixLayout#SESSION_HISTORY_FRAMING */
+    public static final String SESSION_HISTORY_FRAMING_PROMPT = PromptPrefixLayout.SESSION_HISTORY_FRAMING;
 
     private final String sessionId;
     private final ChatMemory chatMemory;
@@ -58,9 +53,10 @@ public abstract class Session<T extends Context> {
         }
         String contextId = CONTEXT_KEY_PREFIX + sessionId + ":" + UUID.randomUUID();
         currentContextId = contextId;
-        T context = createContext(contextId);
+        String normalizedRequest = request == null ? "" : request.trim();
+        T context = createContext(contextId, normalizedRequest);
         currentContext = context;
-        currentPromptRequest = request == null ? "" : request.trim();
+        currentPromptRequest = normalizedRequest;
         context.setPromptRequest(currentPromptRequest);
         historyContext.put(contextId, context);
         initializeContext(context, request);
@@ -117,25 +113,9 @@ public abstract class Session<T extends Context> {
         return messages == null ? List.of() : List.copyOf(messages);
     }
 
-    /**
-     * Copies session memory into {@code target} and appends {@link #SESSION_HISTORY_FRAMING_PROMPT}.
-     *
-     * @return number of hydrated session messages (excludes framing); 0 if session memory was empty
-     */
-    protected int hydrateSessionHistory(BaseUserContext target) {
-        List<Message> sessionMessages = getSessionMessages();
-        if (sessionMessages.isEmpty()) {
-            return 0;
-        }
-        int hydrated = 0;
-        for (Message message : sessionMessages) {
-            target.addMemory(message);
-            hydrated++;
-        }
-        // User role (not System) so multi-turn requests keep a single leading system message for the agent.
-        target.addMemory(new UserMessage(SESSION_HISTORY_FRAMING_PROMPT));
-        target.setSessionHydrationMessageCount(hydrated);
-        return hydrated;
+    /** Binds prior session summaries on {@code target}; prefix order is applied in {@link Context#initializePromptPrefix}. */
+    protected void bindSessionMessages(Context target) {
+        target.bindSessionMessages(getSessionMessages());
     }
 
     /**
@@ -171,7 +151,7 @@ public abstract class Session<T extends Context> {
         System.out.flush();
     }
 
-    protected abstract T createContext(String contextId);
+    protected abstract T createContext(String contextId, String request);
 
     protected abstract void initializeContext(T context, String request);
 

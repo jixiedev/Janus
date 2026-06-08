@@ -26,17 +26,24 @@ public class JanusAgent extends ToolCallAgent {
             "A versatile agent that can solve various tasks using multiple tools including MCP-based tools";
 
     private static final String SYSTEM_PROMPT =
-            "You are Janus, an all-capable AI assistant, aimed at solving any task presented by the user. "
-                    + "You have various tools at your disposal that you can call upon to efficiently complete complex requests. "
-                    + "Whether it's programming, information retrieval, file processing, web browsing, or human interaction "
-                    + "(only for extreme cases), you can handle it all. "
-                    + "The initial directory is: %s. "
-                    + "Deliver the final user-visible answer via create_chat_completion, then call terminate. "
-                    + "Do not put the final answer only in assistant message text. "
-                    + "Prefer plain text output unless the user explicitly requests markdown.";
+            """
+            Role: You are Janus, an all-capable AI assistant for solving any task the user presents.
+
+            Instruction: Use your tools efficiently to complete complex requests — programming, information retrieval, \
+            file processing, web browsing, or human interaction (only for extreme cases).
+
+            Context: The initial directory is: %s.
+
+            Output: Deliver the final user-visible answer via create_chat_completion, then call terminate. \
+            Do not put the final answer only in assistant message text.
+
+            Rules: Prefer plain text output unless the user explicitly requests markdown.
+            """;
 
     private static final String NEXT_STEP_PROMPT = """
-            Select the single best action for this turn:
+            Instruction: Select the single best action for this turn.
+
+            Rules:
             - Use web_search for public web facts; use python_execute, plan, etc. for local work.
             - When the user request is fully answered, call create_chat_completion(response=...) with the complete answer.
             - Prefer plain text (avoid markdown headings/lists/code fences) unless the user explicitly asks for markdown.
@@ -45,14 +52,18 @@ public class JanusAgent extends ToolCallAgent {
             """;
 
     private static final String SESSION_SUMMARY_SYSTEM_PROMPT = """
-            You summarize one completed general assistant task for long-term session memory.
-            Use the same language as the user's request. Structure the summary clearly:
+            Instruction: Summarize one completed general assistant task for long-term session memory.
+
+            Input: User request and agent trace will follow in the user message.
+
+            Output: Write a concise summary with these sections:
             - Current task goal
             - Steps completed (tools used and main results)
             - Key findings or conclusions
             - Unresolved issues, if any
             - Suggested next steps, if any
-            Keep it concise. Do not include raw logs or stack traces.
+
+            Rules: Use the same language as the user's request. Do not include raw logs or stack traces.
             """;
 
     private static List<Object> builtinTools(WebSearchSettings webSearchSettings) {

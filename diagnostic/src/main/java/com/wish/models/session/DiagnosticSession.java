@@ -9,6 +9,8 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 
+import java.util.List;
+
 /**
  * Multi-turn diagnostic investigations, aligned with core {@link Session}:
  * <ul>
@@ -51,7 +53,7 @@ public class DiagnosticSession extends Session<DiagnosticRunContext> {
     }
 
     @Override
-    protected DiagnosticRunContext createContext(String contextId) {
+    protected DiagnosticRunContext createContext(String contextId, String request) {
         return new DiagnosticRunContext(contextId, getSessionId(), getChatMemory());
     }
 
@@ -59,10 +61,10 @@ public class DiagnosticSession extends Session<DiagnosticRunContext> {
     protected void initializeContext(DiagnosticRunContext runContext, String request) {
         DiagnosticContext diagnosticContext =
                 DiagnosticContext.forRun(runContext.getConversation(), getSessionId());
-        if (isPersistent()) {
-            diagnosticContext.hydratePriorSession(getSessionMessages());
-        }
-        diagnosticContext.beginCurrentIncident(request);
+        diagnosticContext.bootstrapMainSession(
+                com.wish.prompt.DiagnosticPrompts.DIAGNOSTIC_SYSTEM,
+                isPersistent() ? getSessionMessages() : List.of(),
+                request);
         runContext.setDiagnosticContext(diagnosticContext);
     }
 

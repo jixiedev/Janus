@@ -278,3 +278,4 @@ public class ToolCallService {
         agent.clearConversationScopedTools(scopeId);
     }
 }
+

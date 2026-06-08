@@ -56,7 +56,7 @@ public class KubernetesTool {
             String ns = resolveNamespace(namespace, config);
             ApiClient client = KubernetesClients.create(config);
             CoreV1Api api = new CoreV1Api(client);
-            var request = api.listNamespacedPod(ns).limit((long) limit);
+            var request = api.listNamespacedPod(ns).limit(limit);
             if (labelSelector != null && !labelSelector.isBlank()) {
                 request.labelSelector(labelSelector.trim());
             }
@@ -135,7 +135,7 @@ public class KubernetesTool {
             EventsV1EventList events =
                     eventsApi.listNamespacedEvent(ns)
                             .fieldSelector("regarding.name=" + podName.trim())
-                            .limit(20L)
+                            .limit(20)
                             .execute();
             return formatResult(formatDescribe(ns, config, pod, events), true);
         } catch (IllegalStateException e) {
@@ -173,7 +173,7 @@ public class KubernetesTool {
                     .append(" node=")
                     .append(spec == null ? "" : nullToEmpty(spec.getNodeName()))
                     .append(" started=")
-                    .append(status == null ? "" : nullToEmpty(status.getStartTime()))
+                    .append(status == null || status.getStartTime() == null ? "" : status.getStartTime().toString())
                     .append('\n');
         }
         sb.append("count=").append(count);
