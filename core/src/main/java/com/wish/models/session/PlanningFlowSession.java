@@ -19,13 +19,13 @@ public class PlanningFlowSession extends Session<PlanningFlowUserContext> {
     }
 
     @Override
-    protected PlanningFlowUserContext createContext(String contextId) {
-        return PlanningFlowUserContext.forSession(contextId, getSessionId(), getChatMemory());
+    protected PlanningFlowUserContext createContext(String contextId, String request) {
+        return PlanningFlowUserContext.forSession(contextId, getSessionId(), getChatMemory(), request);
     }
 
     @Override
     protected void initializeContext(PlanningFlowUserContext context, String request) {
-        hydrateSessionHistory(context.getInitializeContext());
+        bindSessionMessages(context.getInitializeContext());
     }
 
     @Override

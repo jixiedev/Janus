@@ -39,10 +39,15 @@ public class StageContext {
                         : backgroundSnapshot;
     }
 
-    /** @return pair of (systemPrompt, userPrompt) for {@link com.wish.agent.base.BaseAgent#run} */
+    /** @return pair of (systemPrompt, stageTaskUserPrompt) for {@link com.wish.agent.base.BaseAgent#run} */
     public Pair<String, String> prepareStagePrompt() {
         String system = stage.getSystemPrompt();
-        String user = DiagnosticPrompts.stageUserPrompt(stage, llmThought, backgroundSnapshot);
-        return Pair.of(system, user);
+        String task = DiagnosticPrompts.stageTaskUserPrompt(stage, llmThought);
+        return Pair.of(system, task);
+    }
+
+    /** Variable background block appended after the stage task user message (prompt-cache optimization). */
+    public String stageBackgroundUserPrompt() {
+        return DiagnosticPrompts.stageBackgroundUserPrompt(backgroundSnapshot);
     }
 }

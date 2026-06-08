@@ -5,18 +5,16 @@ import lombok.Setter;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.chat.messages.MessageType;
-import org.springframework.ai.chat.metadata.Usage;
-import org.springframework.ai.chat.model.ChatResponse;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Per-prompt-run state for agent {@code run}. One instance per {@code Session#beginPrompt};
+ * Per-prompt-run state for agent {@code run}. One instance per {@link com.wish.models.session.Session#beginPrompt};
  * shell services cache {@link com.wish.models.session.Session}, not individual contexts.
  */
 @Getter
-public class BaseUserContext extends Context{
+public class BaseUserContext extends Context {
 
     private int currentStep;
 
@@ -25,7 +23,6 @@ public class BaseUserContext extends Context{
 
     @Setter
     private boolean userOutputEnabled = true;
-
 
     public BaseUserContext(String conversationId, ChatMemory chatMemory) {
         this(conversationId, null, chatMemory);
@@ -89,30 +86,6 @@ public class BaseUserContext extends Context{
         chatMemory.add(conversation, new SystemMessage(memory));
     }
 
-    /**
-     * Ensures the agent {@code systemPrompt} is the first message. Session hydration may add
-     * user/assistant turns before {@link com.wish.agent.base.BaseAgent#run}; without this, the
-     * model sees no system message on multi-turn {@code -c} requests.
-     */
-    public void ensureSystemPrompt(String systemPrompt) {
-        if (systemPrompt == null || systemPrompt.isBlank()) {
-            return;
-        }
-        List<Message> messages = chatMemory.get(conversation);
-        if (messages != null && !messages.isEmpty()) {
-            Message first = messages.get(0);
-            if (first instanceof SystemMessage system && systemPrompt.equals(system.getText())) {
-                return;
-            }
-        }
-        List<Message> updated = new ArrayList<>();
-        updated.add(new SystemMessage(systemPrompt));
-        if (messages != null && !messages.isEmpty()) {
-            updated.addAll(messages);
-        }
-        replaceMemory(updated);
-    }
-
     public boolean hasConversation() {
         List<Message> messages = chatMemory.get(conversation);
         return messages != null && !messages.isEmpty();
@@ -134,7 +107,7 @@ public class BaseUserContext extends Context{
     }
 
     /**
-     * Messages produced during this prompt run (excludes session hydration).
+     * Messages produced during this prompt run (excludes the assembled prefix).
      * Used as input to session summarization; excludes ephemeral nextStepPrompt when
      * {@link com.wish.llm.LLMChatClient#askWithTools} is called with {@code persistNewMessages=false}.
      */
@@ -143,11 +116,10 @@ public class BaseUserContext extends Context{
         if (messages == null || messages.isEmpty()) {
             return List.of();
         }
-        int from = getSessionHydrationMessageCount();
+        int from = getPromptRunStartIndex();
         if (from >= messages.size()) {
             return List.of();
         }
         return List.copyOf(messages.subList(from, messages.size()));
     }
 }
-

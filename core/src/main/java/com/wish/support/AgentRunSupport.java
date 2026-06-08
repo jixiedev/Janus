@@ -1,16 +1,11 @@
 package com.wish.support;
 
 import com.wish.models.context.Context;
-import com.wish.models.context.Context.TokenUsageCounter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.Map;
-import java.util.Set;
 import java.util.function.Supplier;
 
-/** Wraps agent runs with before/after token usage snapshots and logging. */
+/** Wraps agent runs with conversation LLM usage snapshots and end-of-run logging. */
 @Slf4j
 public final class AgentRunSupport {
 
@@ -33,69 +28,16 @@ public final class AgentRunSupport {
     public static String runWithTokenLogging(Context context, Supplier<String> action) {
         String previousConversationId = CURRENT_CONVERSATION_ID.get();
         CURRENT_CONVERSATION_ID.set(resolveToolScopeId(context));
-        TokenUsageCounter usageBefore = context.getTokenUsage();
-        Map<String, TokenUsageCounter> detailsBefore = context.getTokenUsageDetails();
+        ConversationLlmUsage usageBefore = context.snapshotLlmUsage();
         try {
             return action.get();
         } finally {
-            TokenUsageCounter usageAfter = context.getTokenUsage();
-            Map<String, TokenUsageCounter> detailsAfter = context.getTokenUsageDetails();
-            logTokenUsage(
-                    usageAfter.subtract(usageBefore),
-                    usageAfter,
-                    deltaUsageDetails(detailsAfter, detailsBefore),
-                    detailsAfter);
+            ConversationLlmUsage.logRunSummary(usageBefore, context.snapshotLlmUsage());
             if (previousConversationId == null) {
                 CURRENT_CONVERSATION_ID.remove();
             } else {
                 CURRENT_CONVERSATION_ID.set(previousConversationId);
             }
         }
-    }
-
-    private static Map<String, TokenUsageCounter> deltaUsageDetails(
-            Map<String, TokenUsageCounter> after, Map<String, TokenUsageCounter> before) {
-        Set<String> tags = new LinkedHashSet<>();
-        tags.addAll(after.keySet());
-        tags.addAll(before.keySet());
-        Map<String, TokenUsageCounter> delta = new LinkedHashMap<>();
-        for (String tag : tags) {
-            TokenUsageCounter afterUsage = after.getOrDefault(tag, new TokenUsageCounter());
-            TokenUsageCounter beforeUsage = before.getOrDefault(tag, new TokenUsageCounter());
-            delta.put(tag, afterUsage.subtract(beforeUsage));
-        }
-        return delta;
-    }
-
-    private static void logTokenUsage(
-            TokenUsageCounter thisCall,
-            TokenUsageCounter cumulative,
-            Map<String, TokenUsageCounter> thisCallByTag,
-            Map<String, TokenUsageCounter> cumulativeByTag) {
-        log.info(
-                "Token this call (prompt/completion/total): {}/{}/{}",
-                thisCall.getPromptTokens(),
-                thisCall.getCompletionTokens(),
-                thisCall.getTotalTokens());
-        logTokenUsageByTag("Token this call", thisCallByTag);
-        log.info(
-                "Token cumulative (prompt/completion/total): {}/{}/{}",
-                cumulative.getPromptTokens(),
-                cumulative.getCompletionTokens(),
-                cumulative.getTotalTokens());
-        logTokenUsageByTag("Token cumulative", cumulativeByTag);
-    }
-
-    private static void logTokenUsageByTag(String label, Map<String, TokenUsageCounter> usageByTag) {
-        if (usageByTag.isEmpty()) {
-            return;
-        }
-        usageByTag.forEach((tag, usage) -> log.info(
-                "{} [{}] (prompt/completion/total): {}/{}/{}",
-                label,
-                tag,
-                usage.getPromptTokens(),
-                usage.getCompletionTokens(),
-                usage.getTotalTokens()));
     }
 }

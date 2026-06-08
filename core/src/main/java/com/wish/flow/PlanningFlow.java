@@ -240,9 +240,8 @@ public class PlanningFlow extends BaseFlow {
 
         String systemPrompt = buildPlanningSystemPrompt();
         BaseUserContext planningContext = context.getInitializeContext();
-        // Session hydration may already have user/assistant turns; keep one leading system message.
-        planningContext.ensureSystemPrompt(systemPrompt);
-        planningContext.addMemory(new UserMessage(INITIAL_REQUEST_PROMPT_FORMAT.formatted(request, planId)));
+        planningContext.initializePromptPrefix(
+                systemPrompt, INITIAL_REQUEST_PROMPT_FORMAT.formatted(request, planId));
 
         Pair<ChatResponse, Prompt> response = llmChatClient.askWithTools(planningContext, List.of(), List.of());
         AssistantMessage assistantMessage = response.getKey().getResult().getOutput();
@@ -302,8 +301,8 @@ public class PlanningFlow extends BaseFlow {
 
         try {
             BaseUserContext planningContext = context.getFinalizeContext();
-            planningContext.ensureSystemPrompt(FINALIZE_PLAN_SYSTEM_PROMPT);
-            planningContext.addMemory(new UserMessage(FINALIZE_PLAN_USER_PROMPT_FORMAT.formatted(planText)));
+            planningContext.initializePromptPrefix(
+                    FINALIZE_PLAN_SYSTEM_PROMPT, FINALIZE_PLAN_USER_PROMPT_FORMAT.formatted(planText));
             Pair<ChatResponse, Prompt> response = llmChatClient.askWithTools(planningContext, List.of(), List.of());
             String summary = response.getKey().getResult().getOutput().getText();
             context.finalizePlan();

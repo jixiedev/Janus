@@ -28,15 +28,13 @@ public class ToolCallSession extends Session<ToolCallUserContext> {
     }
 
     @Override
-    protected ToolCallUserContext createContext(String contextId) {
+    protected ToolCallUserContext createContext(String contextId, String request) {
         return new ToolCallUserContext(contextId, getSessionId(), getChatMemory());
     }
 
     @Override
     protected void initializeContext(ToolCallUserContext context, String request) {
-        // Optimization: hydration count excludes framing so summarize can distinguish prior session
-        // history from messages generated in this prompt run.
-        hydrateSessionHistory(context);
+        bindSessionMessages(context);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.wish.config;
 
+import com.wish.support.ConversationLlmUsage;
 import com.wish.support.Shower;
 import org.jline.reader.LineReader;
 import org.jline.utils.AttributedString;
@@ -21,7 +22,9 @@ public class ShellPromptConfig {
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    public void configureShowerOutput() {
+    public void configureShowerOutput(
+            @Value("${janus.conversation.llm-usage-log:false}") boolean llmUsageLog) {
+        ConversationLlmUsage.setRunSummaryLoggingEnabled(llmUsageLog);
         LineReader lineReader = lineReaderProvider.getIfAvailable();
         if (lineReader != null) {
             Shower.setOutputConsumer(lineReader::printAbove);

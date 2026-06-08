@@ -74,6 +74,16 @@ public abstract class BaseAgent {
     }
 
     public synchronized String run(BaseUserContext userContext, String request) {
+        return run(userContext, request, List.of());
+    }
+
+    /**
+     * @param trailingUserMessages optional user blocks appended after the primary request and any
+     *                             deferred session history (prompt-cache optimization: keep variable
+     *                             background text at the tail of the stable prefix)
+     */
+    public synchronized String run(
+            BaseUserContext userContext, String request, List<String> trailingUserMessages) {
         if (!healthCheck()) {
             throw new IllegalStateException("Cannot run agent from state " + this.agentState);
         }
@@ -83,10 +93,10 @@ public abstract class BaseAgent {
         List<String> results = new ArrayList<>();
 
         try {
-            userContext.ensureSystemPrompt(systemPrompt);
-            if (request != null && !request.isBlank()) {
-                userContext.addUserMemory(request);
-            }
+            userContext.initializePromptPrefix(
+                    systemPrompt,
+                    request == null ? "" : request,
+                    trailingUserMessages == null ? List.of() : trailingUserMessages);
 
             while (userContext.getCurrentStep() < maxSteps && agentState != AgentState.FINISHED) {
                 int step = userContext.nextStep();

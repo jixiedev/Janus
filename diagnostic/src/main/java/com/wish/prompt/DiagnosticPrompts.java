@@ -68,11 +68,9 @@ public final class DiagnosticPrompts {
                 mainSessionSnapshot == null || mainSessionSnapshot.isBlank()
                         ? "(no main session content yet)"
                         : mainSessionSnapshot.trim();
+        // Optimization: stable routing instructions first; variable main-session snapshot at the tail.
         return """
                 Choose the next investigation stage by calling `router` with the stage name.
-
-                ### Main session snapshot (read-only)
-                %s
 
                 ### Structured progress
                 %s
@@ -81,13 +79,16 @@ public final class DiagnosticPrompts {
                 Last stage finding: %s
 
                 Current stage marker (before your choice): %s
+
+                ### Main session snapshot (read-only)
+                %s
                 """
                 .formatted(
-                        snapshot,
                         state.desc(),
                         lastStageLine,
                         lastFindingLine,
-                        state.getCurrentStage().getName());
+                        state.getCurrentStage().getName(),
+                        snapshot);
     }
 
     public static String initialIncidentPrompt(String rawRequest) {
@@ -101,7 +102,8 @@ public final class DiagnosticPrompts {
                 .formatted(rawRequest == null ? "" : rawRequest.trim());
     }
 
-    public static String stageUserPrompt(Stage stage, String routerThought, String backgroundBlock) {
+    /** Stable stage-task header (prompt-cache prefix within a stage's multi-step loop). */
+    public static String stageTaskUserPrompt(Stage stage, String routerThought) {
         String thoughtBlock =
                 routerThought == null || routerThought.isBlank()
                         ? "(no routing rationale recorded)"
@@ -112,14 +114,28 @@ public final class DiagnosticPrompts {
                 ### Why this stage was chosen
                 %s
 
-                ### Investigation background (main session snapshot at stage entry — read-only)
-                %s
-
                 Execute this stage in your isolated context. Tool traces here stay in this stage only.
                 %s
                 Deliver the stage result only via submit_stage_finding when done.
                 """
-                .formatted(stage.getName(), thoughtBlock, backgroundBlock, rootCauseToolHint(stage));
+                .formatted(stage.getName(), thoughtBlock, rootCauseToolHint(stage));
+    }
+
+    /** Variable investigation background; appended after {@link #stageTaskUserPrompt} for cache-friendly ordering. */
+    public static String stageBackgroundUserPrompt(String backgroundBlock) {
+        String background =
+                backgroundBlock == null || backgroundBlock.isBlank()
+                        ? "(no background yet)"
+                        : backgroundBlock.trim();
+        return """
+                ### Investigation background (main session snapshot at stage entry — read-only)
+                %s
+                """
+                .formatted(background);
+    }
+
+    public static String stageUserPrompt(Stage stage, String routerThought, String backgroundBlock) {
+        return stageTaskUserPrompt(stage, routerThought) + "\n\n" + stageBackgroundUserPrompt(backgroundBlock);
     }
 
     private static String rootCauseToolHint(Stage stage) {

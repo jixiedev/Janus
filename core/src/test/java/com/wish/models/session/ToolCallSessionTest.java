@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,13 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolCallSessionTest {
 
+    private static final String AGENT_SYSTEM = "You are a helpful assistant.";
+
     @Test
     void persistentSession_storesRequestAndResultPairPerPrompt() {
         var chatMemory = MessageWindowChatMemory.builder().build();
         ToolCallSession session = new ToolCallSession("demo", chatMemory, "test summary prompt");
 
         ToolCallUserContext first = session.beginPrompt("first task");
-        first.addUserMemory("first task");
+        first.initializePromptPrefix(AGENT_SYSTEM, "first task");
         first.addMemory(new AssistantMessage("done one"));
         session.endPrompt("Step 1: done one");
 
@@ -30,14 +31,18 @@ class ToolCallSessionTest {
         ToolCallUserContext second = session.beginPrompt("second task");
         assertEquals("demo", second.getSessionId());
         assertNotEquals(first.getConversation(), second.getConversation());
-        assertEquals(3, second.getAllMessages().size());
-        assertEquals("first task", second.getAllMessages().get(0).getText());
-        assertEquals("done one", second.getAllMessages().get(1).getText());
-        assertInstanceOf(UserMessage.class, second.getAllMessages().get(2));
-        assertTrue(second.getAllMessages().get(2).getText().contains("background"));
-        assertEquals(2, second.getSessionHydrationMessageCount());
+        assertTrue(second.getAllMessages().isEmpty());
 
-        second.addUserMemory("second task");
+        second.initializePromptPrefix(AGENT_SYSTEM, "second task");
+        assertEquals(5, second.getAllMessages().size());
+        assertEquals(AGENT_SYSTEM, second.getAllMessages().get(0).getText());
+        assertEquals("second task", second.getAllMessages().get(1).getText());
+        assertInstanceOf(UserMessage.class, second.getAllMessages().get(2));
+        assertTrue(second.getAllMessages().get(2).getText().contains("current task"));
+        assertEquals("first task", second.getAllMessages().get(3).getText());
+        assertEquals("done one", second.getAllMessages().get(4).getText());
+        assertEquals(5, second.getPromptRunStartIndex());
+
         second.addMemory(new AssistantMessage("done two"));
         session.endPrompt("Step 1: done two");
 
@@ -58,7 +63,7 @@ class ToolCallSessionTest {
 
         ToolCallUserContext context = session.beginPrompt("hello");
         String contextKey = context.getConversation();
-        context.addUserMemory("hello");
+        context.initializePromptPrefix(AGENT_SYSTEM, "hello");
         context.addMemory(new AssistantMessage("hi"));
         session.endPrompt("Step 1: hi");
 
@@ -69,17 +74,19 @@ class ToolCallSessionTest {
     }
 
     @Test
-    void initializeContext_copiesPriorSessionSummaryPairs() {
+    void initializeContext_bindsPriorSessionSummaryPairs() {
         var chatMemory = MessageWindowChatMemory.builder().build();
         chatMemory.add("session:demo", new UserMessage("prior request"));
         chatMemory.add("session:demo", new AssistantMessage("prior result"));
 
         ToolCallSession session = new ToolCallSession("demo", chatMemory, "test summary prompt");
         ToolCallUserContext context = session.beginPrompt("new");
-        assertEquals(3, context.getAllMessages().size());
-        assertEquals("prior request", context.getAllMessages().get(0).getText());
-        assertInstanceOf(UserMessage.class, context.getAllMessages().get(2));
-        assertEquals(2, context.getSessionHydrationMessageCount());
+        assertTrue(context.getAllMessages().isEmpty());
+        context.initializePromptPrefix(AGENT_SYSTEM, "new");
+        assertEquals(5, context.getAllMessages().size());
+        assertEquals("new", context.getAllMessages().get(1).getText());
+        assertEquals("prior request", context.getAllMessages().get(3).getText());
+        assertEquals(5, context.getPromptRunStartIndex());
         session.endPrompt();
     }
 
@@ -89,7 +96,7 @@ class ToolCallSessionTest {
         ToolCallSession session = new ToolCallSession("demo", chatMemory, "test summary prompt");
 
         ToolCallUserContext context = session.beginPrompt("first");
-        context.addUserMemory("first");
+        context.initializePromptPrefix(AGENT_SYSTEM, "first");
         session.abortPrompt();
 
         assertTrue(chatMemory.get(session.getSessionMemoryKey()).isEmpty());

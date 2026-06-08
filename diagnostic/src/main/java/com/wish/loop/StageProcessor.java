@@ -27,7 +27,12 @@ public class StageProcessor {
     public void execute() {
         Pair<String, String> stagePrompt = stageContext.prepareStagePrompt();
         stageToolCallAgent.setSystemPrompt(stagePrompt.getLeft());
-        String finding = stageToolCallAgent.run(stageContext.getBaseUserContext(), stagePrompt.getRight());
+        // Optimization: stage system + task user message precede variable background for prefix cache hits.
+        String finding =
+                stageToolCallAgent.run(
+                        stageContext.getBaseUserContext(),
+                        stagePrompt.getRight(),
+                        List.of(stageContext.stageBackgroundUserPrompt()));
         stageContext.setStageFinding(finding == null ? "" : finding.trim());
     }
 }
