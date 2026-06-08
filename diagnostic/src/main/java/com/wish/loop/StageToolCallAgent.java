@@ -20,9 +20,17 @@ import java.util.function.Supplier;
 public class StageToolCallAgent extends ToolCallAgent {
 
     private static final String STAGE_SESSION_SUMMARY = """
-            Summarize one completed diagnostic stage for the main investigation record.
-            Include: stage name, evidence gathered, conclusions, and open questions.
-            Use the same language as the incident report. Keep it concise.
+            Instruction: Summarize one completed diagnostic stage for the main investigation record.
+
+            Input: Stage trace will follow in the user message.
+
+            Output: Write a concise summary covering:
+            - Stage name
+            - Evidence gathered
+            - Conclusions
+            - Open questions
+
+            Rules: Use the same language as the incident report.
             """;
 
     private static final List<Object> STAGE_BUILTIN_TOOLS = List.of(new StageFindingTool(), new TerminateTool());

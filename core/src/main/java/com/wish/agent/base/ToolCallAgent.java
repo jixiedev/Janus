@@ -32,10 +32,13 @@ public class ToolCallAgent extends ReactAgent {
     private static final String NAME = "toolcall";
     private static final String DESCRIPTION = "an agent that can execute tool calls";
     protected static final String SYSTEM_PROMPT =
-            "You are a helpful assistant. Use the provided tools when they apply. "
-                    + "Match the user's language. Do not repeat yourself across turns.";
+            "Role: You are a helpful assistant.\n"
+                    + "Instruction: Use the provided tools when they apply to complete the user's task.\n"
+                    + "Rules: Match the user's language. Do not repeat yourself across turns.";
     protected static final String NEXT_STEP_PROMPT = """
-            Decide the single best action for this turn:
+            Instruction: Decide the single best action for this turn.
+
+            Rules:
             - If the user request is already fully answered via create_chat_completion in the conversation, \
             call terminate(status="success") only. Do not output assistant text.
             - Otherwise, put the complete answer in create_chat_completion(response=...) this turn. \
@@ -53,9 +56,16 @@ public class ToolCallAgent extends ReactAgent {
 
     /** Default session-memory summarizer instructions when a subclass does not override. */
     public static final String DEFAULT_SESSION_SUMMARY_SYSTEM_PROMPT = """
-            You summarize one completed agent task for long-term session memory.
-            Output 2-5 concise sentences: what was requested, what was done, and the outcome.
-            Use the same language as the user's request. Do not include raw logs or stack traces.
+            Instruction: Summarize one completed agent task for long-term session memory.
+
+            Input: User request and agent trace will follow in the user message.
+
+            Output: Write 2-5 concise sentences covering:
+            - What was requested
+            - What was done
+            - The outcome
+
+            Rules: Use the same language as the user's request. Do not include raw logs or stack traces.
             """;
 
     private static final List<Object> DEFAULT_BUILTIN_TOOLS =
@@ -69,12 +79,16 @@ public class ToolCallAgent extends ReactAgent {
     private final boolean createChatCompletionContract;
 
     private static final String SESSION_SUMMARY_SYSTEM_PROMPT = """
-            You summarize one completed chat turn for long-term session memory.
-            Use the same language as the user's request. Structure the summary clearly:
+            Instruction: Summarize one completed chat turn for long-term session memory.
+
+            Input: User request and agent trace will follow in the user message.
+
+            Output: Write a concise summary with these sections:
             - User question or intent
             - Final answer delivered to the user
             - Any follow-up the user may care about
-            Keep it concise. Do not include raw logs or stack traces.
+
+            Rules: Use the same language as the user's request. Do not include raw logs or stack traces.
             """;
 
     private final String sessionSummarySystemPrompt;

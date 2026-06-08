@@ -178,6 +178,191 @@ The plan drives **what** runs next and **which** agent runs it—not free-form t
 
 ---
 
+## Prompt design and optimization
+
+Janus prompts follow structured patterns from the [Prompt Engineering Guide — Examples of Prompts](https://www.promptingguide.ai/introduction/examples.en#text-summarization), while respecting **prefix cache** and **session memory** constraints.
+
+### Structured elements
+
+Split each prompt into clear blocks instead of mixing role, task, background, format, and constraints in one paragraph:
+
+| Block | Purpose | Typical placement |
+|-------|---------|-------------------|
+| **Role** | Persona and domain (role prompting) | Start of system prompt |
+| **Instruction** | What to do this step | System / user / nextStep |
+| **Context** | Read-only background (history, progress, plan status) | User message |
+| **Input** | Content to process (user text, trace, snapshot) | User message |
+| **Output** | Expected deliverable or tool usage | System prompt; append `Summary:` for summarization user messages |
+| **Rules** | Language, no fabrication, tool limits, convergence | System / nextStep |
+
+Question-answering style (Context + question + `Answer:`) and summarization style (Instruction + Input + `Summary:`) are used for session summaries and plan finalization.
+
+Example (session summary system prompt):
+
+```text
+Instruction: Summarize one completed agent task for long-term session memory.
+Input: User request and agent trace will follow in the user message.
+Output: Write 2-5 concise sentences covering:
+- What was requested
+- What was done
+- The outcome
+Rules: Use the same language as the user's request. Do not include raw logs or stack traces.
+```
+
+### Prompt layers
+
+| Type | Lifetime | Where defined | Notes |
+|------|----------|---------------|-------|
+| **systemPrompt (S)** | Fixed per request | Agent classes, `DiagnosticPrompts`, `Stage` | Role + Instruction + Output/Rules |
+| **primary user request (U₀)** | Current task | CLI `-p` / API | Placed at the front of the prefix |
+| **trailing user blocks** | Variable per request | `PromptPrefixLayout.build(..., trailingUserBlocks)` | Router snapshots, stage background, etc. |
+| **nextStepPrompt (Uₙ)** | **Ephemeral** | `NEXT_STEP_PROMPT`, `Stage.nextStepPrompt()` | Single-step guidance; not stored in session by default |
+| **session summary prompt** | Cross-turn | `sessionSummarySystemPrompt()`, `DiagnosticPrompts` | Compressed by `PromptRunSummarizer` to two messages per turn |
+
+Guidelines:
+
+- Put **stable, cache-friendly text in the prefix**; put **request-specific data at the tail**.
+- Deliver user-visible answers via **`create_chat_completion`** (Janus / tool-call) or **`submit_stage_finding`** (diagnostic), then **`terminate`** on a later step.
+- For classification (`classify_incident`, etc.), spell out label semantics in **Instruction**; add few-shot examples when output format must be exact (same idea as sentiment examples in the Guide).
+
+### Prefix order and prompt cache
+
+`PromptPrefixLayout` fixes message order for **prefix cache** reuse:
+
+```text
+S → U₀ (current task) → trailing user blocks → session framing → prior summaries → A/T (step loop)
+```
+
+- **Current task stays directly under S** so the system + task prefix stays stable within a session; only the tail (snapshots, history) changes.
+- **SESSION_HISTORY_FRAMING** sits before hydrated history and states that messages above are the current task and messages below are background only—reduces misreading old summaries as new instructions.
+- In diagnostic routing, stable routing instructions come **before** the main session snapshot.
+
+Implementation: `core/src/main/java/com/wish/models/context/PromptPrefixLayout.java`.
+
+### Diagnostic module
+
+The diagnostic flow differs from a single-agent `run`: a **router + multiple stages** cooperate across **three isolated contexts**. Code lives under `diagnostic/`; CLI usage is in [shell/docs/SHELL.en.md](../../shell/docs/SHELL.en.md#example-diagnostic-incident-investigation).
+
+#### Three contexts and prompt roles
+
+| Context | Storage | System (S) | Main user content | Persists across steps |
+|---------|---------|------------|-------------------|------------------------|
+| **Main session** | `DiagnosticContext.mainSession` | `DIAGNOSTIC_SYSTEM` | `initialIncidentPrompt` (U₀) + `stageFindingMessage` per stage | **Session** summary + incident report |
+| **Router** | `routeChatMemory` (separate partition) | `ROUTER_SYSTEM` | `routeStageUserPrompt` each loop | **This run only**; cleared in `cleanupRun()` |
+| **Stage** | `stageChatMemory` (new partition per stage) | `Stage.systemPrompt` | `stageTaskUserPrompt` + `stageBackgroundUserPrompt` (trailing) | **This stage only**; cleared in `endStage()` |
+
+Boundary rules (`DiagnosticContext`):
+
+- Stage tool traces **do not** write back to main session; only **`submit_stage_finding`** contributes conclusions.
+- The router’s `mainSessionSnapshot` is a **boundary copy**, not stored in stage ChatMemory.
+- Multi-turn `-c` hydrates prior turns into the **tail** of main session (after framing), same as core agents.
+
+#### Investigation loop
+
+```mermaid
+flowchart TB
+    IN[user incident -p] --> BOOT[bootstrapMainSession]
+    BOOT --> LOOP{shouldContinue?}
+    LOOP -->|yes| RT[Router: ROUTER_SYSTEM + routeStageUserPrompt]
+    RT -->|router tool| STG[Stage: Stage.systemPrompt + task + background]
+    STG -->|submit_stage_finding| FIND[contributeStageFinding → mainSession]
+    FIND --> LOOP
+    LOOP -->|no TERMINATE/ERROR| OUT[buildRunResult]
+    OUT --> SUM[endPrompt: SESSION_SUMMARY + incident archive]
+```
+
+Prefix order within one stage (`StageProcessor` + `ToolCallAgent.run`):
+
+```text
+S (Stage.systemPrompt) → U₀ (stageTaskUserPrompt) → trailing (stageBackgroundUserPrompt) → Uₙ/A/T (step loop)
+```
+
+Same global rule: **stable task instructions first**, variable background snapshot last—for prefix cache within a multi-step stage.
+
+#### `DiagnosticPrompts` constants
+
+| Constant | Role |
+|----------|------|
+| `DIAGNOSTIC_SYSTEM` | Main-session coordinator; separates problem type vs root cause |
+| `ROUTER_SYSTEM` | Stage routing; `router` tool only |
+| `routeStageUserPrompt` | Per-loop router user message (progress + snapshot) |
+| `initialIncidentPrompt` | Formats first incident as U₀ |
+| `stageTaskUserPrompt` / `stageBackgroundUserPrompt` | Stage task vs read-only background |
+| `stageFindingMessage` | Template when a stage finding is appended to main session |
+| `SESSION_SUMMARY_SYSTEM` | Multi-turn session compression (`DiagnosticSession`) |
+| `INCIDENT_REPORT_SUMMARY_SYSTEM` | Per-run archival report (`IncidentReportArchiver`) |
+
+Structured tools (output contract):
+
+| Tool | Stage | Meaning |
+|------|-------|---------|
+| `router` | Router | Choose next `Stage` |
+| `classify_incident` | CLASSIFY | **Problem type** (symptom, not root cause); enum from `IncidentCategory.catalogForPrompt()` |
+| `classify_root_cause` | COLLECT onward | **Root cause**; updatable; enum from `IncidentRootCause.catalogForPrompt()` |
+| `submit_stage_finding` | Each stage | Stage deliverable (diagnostic equivalent of `create_chat_completion`) |
+| `terminate` | Each stage | End stage agent run |
+
+`StageToolCallAgent` sets `directSessionResultTool` to `submit_stage_finding`; the summarizer prefers that over assistant text.
+
+#### Stage prompts
+
+Each `Stage` enum defines:
+
+| Type | Source | Notes |
+|------|--------|-------|
+| **Stage system** | `Stage.systemPrompt` | Role + Instruction + Rules + Output (e.g. CLASSIFY: problem type only) |
+| **Step nextStep** | `Stage.nextStepPrompt()` | Ephemeral; one action per turn; `submit_stage_finding` then `terminate` |
+
+Typical router path: `INITIAL → CLASSIFY → COLLECT → ANALYZE → VALIDATE → TERMINATE | ERROR`.
+
+Classification design (Guide-style):
+
+- **Problem type** and **root cause** use separate stages and tools so CLASSIFY does not over-attribute root cause.
+- Enum catalogs are embedded in Instructions; add few-shot in CLASSIFY when label format must be exact.
+
+#### Dual summarization
+
+| Path | System prompt | When | Output |
+|------|---------------|------|--------|
+| Session continuation | `SESSION_SUMMARY_SYSTEM` | `DiagnosticSession.endPrompt` | 2 summary messages per turn in ChatMemory |
+| Incident archive | `INCIDENT_REPORT_SUMMARY_SYSTEM` | `IncidentReportArchiver.archiveRun` | `.md` / `.json` under `~/.janus/diagnostic-reports/` |
+
+Both use `PromptRunSummarizer` on `getPromptMessagesForSummary()` (main-session delta this run) + run result, with **Instruction → Context → `Summary:`** user messages.
+
+#### Editing diagnostic prompts
+
+1. Routing text → `DiagnosticPrompts`; stage behavior → `Stage` enum or `Stage.nextStepPrompt()`.
+2. Keep **snapshots / background at the tail** of user messages, labeled `read-only`.
+3. Stage conclusions must go through **`submit_stage_finding`**, not assistant-only text into main session.
+4. Run `diagnostic` module tests; core `PromptPrefixLayoutTest` still covers shared prefix layout.
+
+### Where prompts live in code
+
+| Area | Main files |
+|------|------------|
+| Generic / Janus / SWE / DA agents | `core/.../agent/*.java`, `ToolCallAgent.java` |
+| Planning flow | `core/.../flow/PlanningFlow.java` |
+| Session summarization | `PromptRunSummarizer.java` + per-agent `SESSION_SUMMARY_*` |
+| Diagnostic prompts / stages | `diagnostic/.../prompt/DiagnosticPrompts.java`, `model/stage/Stage.java` |
+| Diagnostic context boundaries | `diagnostic/.../model/DiagnosticContext.java` |
+| Diagnostic execution loop | `diagnostic/.../loop/DiagnosticAgent.java`, `StageProcessor.java`, `StageToolCallAgent.java` |
+| Diagnostic session / reports | `diagnostic/.../models/session/DiagnosticSession.java`, `models/report/IncidentReportArchiver.java` |
+
+When adding or editing prompts:
+
+1. Use **Role → Instruction → Output/Rules** (system) or **Instruction → Context/Input → Summary:** (summarization user messages).
+2. Keep **U₀ short**; put large read-only material in trailing blocks or Context sections labeled `read-only`.
+3. **nextStepPrompt** should describe **one best action per turn**; put convergence rules (e.g. terminate after `create_chat_completion`) under **Rules**.
+4. Run related tests: `PromptPrefixLayoutTest`, `AgentSessionSummaryPromptTest`, `PromptRunSummarizerTest`; diagnostic tests in the `diagnostic` module.
+
+### Working with memory
+
+- **Stored in session**: compressed user request + agent result per prompt (and diagnostic incident reports)—not full step traces.
+- **Not stored in session**: `nextStepPrompt`, ephemeral routing/stage hints, raw tool logs (omitted by summary Rules).
+- Continuation issues (treating “continue” or framing text as a new task) often mean stale session data; use `clear-session`. See [FAQ.en.md](../../docs/FAQ.en.md).
+
+---
+
 ## Extending
 
 | Goal | Approach |

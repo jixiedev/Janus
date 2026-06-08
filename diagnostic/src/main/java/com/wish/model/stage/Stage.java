@@ -18,8 +18,10 @@ public enum Stage {
             1,
             false,
             """
-                    You are in the INITIAL stage. Immediately hand off: call submit_stage_finding stating that \
-                    investigation is starting, then terminate(status="success").
+                    Role: INITIAL stage handoff agent.
+                    Instruction: Immediately hand off investigation startup.
+                    Output: Call submit_stage_finding stating that investigation is starting, \
+                    then terminate(status="success").
                     """),
     CLASSIFY(
             "Classify",
@@ -28,14 +30,20 @@ public enum Stage {
             10,
             false,
             """
-                    You are in the CLASSIFY stage of an incident investigation.
-                    Classify the **problem type** (what is wrong or what the user reports) — not the root cause.
-                    Do not assign categories such as infrastructure fault, misconfiguration, or vendor blame; those \
-                    belong in later ANALYZE / VALIDATE stages after evidence.
-                    Read the incident report and background. Choose exactly one problem type from the allowed enum \
-                    and call classify_incident with the enum name and a short rationale tied to reported symptoms.
+                    Role: CLASSIFY stage agent in an incident investigation.
+
+                    Instruction: Classify the **problem type** (what is wrong or what the user reports) — not the root cause.
+
+                    Rules:
+                    - Do not assign categories such as infrastructure fault, misconfiguration, or vendor blame; \
+                    those belong in later ANALYZE / VALIDATE stages after evidence.
+                    - Read the incident report and background.
+                    - Choose exactly one problem type from the allowed enum.
+
+                    Output: Call classify_incident with the enum name and a short rationale tied to reported symptoms. \
                     When classification is recorded, call submit_stage_finding summarizing the problem type only, \
                     then call terminate(status="success").
+
                     Allowed problem types:
                     """
                     + com.wish.model.incident.IncidentCategory.catalogForPrompt()),
@@ -46,11 +54,15 @@ public enum Stage {
             30,
             false,
             """
-                    You are in the COLLECT stage of an incident investigation.
-                    Gather concrete evidence: timestamps, job IDs, error messages, affected tables/pipelines, \
-                    and recent changes. Use available tools; do not invent data.
+                    Role: COLLECT stage agent in an incident investigation.
+
+                    Instruction: Gather concrete evidence: timestamps, job IDs, error messages, affected tables/pipelines, \
+                    and recent changes.
+
+                    Rules: Use available tools; do not invent data. \
                     If evidence suggests a likely root cause, call classify_root_cause (TENTATIVE or PROBABLE).
-                    When this stage is complete, call submit_stage_finding with a concise evidence summary, \
+
+                    Output: Call submit_stage_finding with a concise evidence summary, \
                     then call terminate(status="success").
                     """),
     ANALYZE(
@@ -60,11 +72,16 @@ public enum Stage {
             30,
             false,
             """
-                    You are in the ANALYZE stage of an incident investigation.
-                    Reason over the background findings and new tool results. State hypotheses, supporting evidence, \
-                    and what remains uncertain. Prefer query_warehouse only when you need to verify a specific metric or row sample.
-                    Update classify_root_cause when analysis narrows why the incident happened (replace prior assignment if needed).
-                    When this stage is complete, call submit_stage_finding with your analysis summary, \
+                    Role: ANALYZE stage agent in an incident investigation.
+
+                    Instruction: Reason over the background findings and new tool results. State hypotheses, \
+                    supporting evidence, and what remains uncertain.
+
+                    Rules: Prefer query_warehouse only when you need to verify a specific metric or row sample. \
+                    Update classify_root_cause when analysis narrows why the incident happened \
+                    (replace prior assignment if needed).
+
+                    Output: Call submit_stage_finding with your analysis summary, \
                     then call terminate(status="success").
                     """),
     VALIDATE(
@@ -74,10 +91,14 @@ public enum Stage {
             30,
             false,
             """
-                    You are in the VALIDATE stage of an incident investigation.
-                    Run targeted checks to confirm or reject prior hypotheses. Prefer decisive validation steps.
+                    Role: VALIDATE stage agent in an incident investigation.
+
+                    Instruction: Run targeted checks to confirm or reject prior hypotheses.
+
+                    Rules: Prefer decisive validation steps. \
                     Call classify_root_cause with CONFIRMED or revised cause when validation proves or disproves a hypothesis.
-                    When this stage is complete, call submit_stage_finding with validation results and confidence, \
+
+                    Output: Call submit_stage_finding with validation results and confidence, \
                     then call terminate(status="success").
                     """),
     TERMINATE(
@@ -87,10 +108,14 @@ public enum Stage {
             3,
             true,
             """
-                    You are in the TERMINATE stage. The investigation is ending.
-                    Synthesize all prior stage findings into a final incident report: summary, impact, and recommended actions.
-                    Ensure classify_root_cause reflects the final best-supported root cause (update if needed).
-                    Call submit_stage_finding with the full final report, then terminate(status="success").
+                    Role: TERMINATE stage agent. The investigation is ending.
+
+                    Instruction: Synthesize all prior stage findings into a final incident report: summary, impact, \
+                    and recommended actions.
+
+                    Rules: Ensure classify_root_cause reflects the final best-supported root cause (update if needed).
+
+                    Output: Call submit_stage_finding with the full final report, then terminate(status="success").
                     """),
     ERROR(
             "Error",
@@ -99,9 +124,11 @@ public enum Stage {
             3,
             true,
             """
-                    You are in the ERROR stage. The investigation cannot continue normally.
-                    Document the blocker, what was attempted, and what is needed to resume.
-                    Call submit_stage_finding with the error summary, then terminate(status="error").
+                    Role: ERROR stage agent. The investigation cannot continue normally.
+
+                    Instruction: Document the blocker, what was attempted, and what is needed to resume.
+
+                    Output: Call submit_stage_finding with the error summary, then terminate(status="error").
                     """);
 
     private final String name;
@@ -143,7 +170,9 @@ public enum Stage {
     public String nextStepPrompt() {
         if (this == CLASSIFY) {
             return """
-                    Stage: Classify. One action this turn:
+                    Instruction: One action this turn for the Classify stage.
+
+                    Rules:
                     - Classify the **problem** (symptom / user-visible issue), not root cause.
                     - If problem type is not set yet, call classify_incident with one enum value and rationale.
                     - After classify_incident, call submit_stage_finding with the problem-type summary, then terminate.
@@ -154,7 +183,9 @@ public enum Stage {
                         ? "- Update classify_root_cause when evidence supports or changes the root-cause assignment.\n"
                         : "";
         return """
-                Stage: %s. One action this turn:
+                Instruction: One action this turn for stage %s.
+
+                Rules:
                 %s- If evidence or conclusions for this stage are ready, call submit_stage_finding with the full \
                 stage output, then call terminate in the next turn.
                 - Otherwise use tools to gather or verify information. Do not repeat prior stage summaries verbatim.
