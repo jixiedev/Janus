@@ -1,8 +1,9 @@
 package com.wish.model;
 
-import com.wish.models.context.BaseUserContext;
+import com.wish.models.context.Context;
 import com.wish.models.context.PromptPrefixLayout;
 import com.wish.models.context.ToolCallUserContext;
+import com.wish.models.report.IncidentReportStore;
 import com.wish.model.stage.Stage;
 import com.wish.model.stage.StageContext;
 import com.wish.model.state.State;
@@ -24,10 +25,12 @@ import java.util.UUID;
  * One investigation run with strict context boundaries:
  * <ul>
  *   <li><b>Main session</b> ({@link #mainSession}) — incident + stage findings; hydrated from {@link Session} on multi-turn</li>
- *   <li><b>Router</b> ({@link #routeChatMemory}) — isolated routing turns</li>
+ *   <li><b>Router</b> ({@link #routeChatMemory}) — one-shot per {@code routeStage}; reset to prefix each turn, \
+ *       progress from {@link State} only</li>
  *   <li><b>Stage</b> ({@link #stageChatMemory}) — isolated per stage; cleared in {@link #endStage()}</li>
  * </ul>
- * Cross-boundary: {@link #snapshotMainSession()} at stage start; {@link #contributeStageFinding} at stage end.
+ * Cross-boundary: {@link #formatSharedInvestigationBackground()} at route/stage entry; \
+ * {@link #contributeStageFinding} at stage end.
  * Multi-turn: prior turns are assembled into {@link #mainSession} via {@link #bootstrapMainSession}.
  */
 @Slf4j
@@ -50,6 +53,9 @@ public class DiagnosticContext {
 
     private final List<Message> mainSession = new ArrayList<>();
 
+    /** Hydrated from {@link #bootstrapMainSession}; wired into router prefix via {@link #prepareRouteStageContext()}. */
+    private List<Message> priorTurnSummaries = List.of();
+
     /** Index in {@link #mainSession} where this prompt run starts (after session hydration). */
     @Getter
     private int promptRunStartIndex = 0;
@@ -63,8 +69,12 @@ public class DiagnosticContext {
     @Setter
     private String runResult = "";
 
+    @Getter
+    @Setter
+    private IncidentReportStore reportStore;
+
     private String currentStageConversationId;
-    private BaseUserContext routeStageContext;
+    private Context routeStageContext;
 
     private DiagnosticContext(String contextId, String sessionId, State currentState) {
         this.contextId = contextId;
@@ -97,6 +107,7 @@ public class DiagnosticContext {
         this.rawRequest = rawRequest == null ? "" : rawRequest.trim();
         List<Message> bound =
                 sessionMessages == null || sessionMessages.isEmpty() ? List.of() : List.copyOf(sessionMessages);
+        this.priorTurnSummaries = bound;
         String userRequest = DiagnosticPrompts.initialIncidentPrompt(this.rawRequest);
         List<Message> prefix = PromptPrefixLayout.build(systemPrompt, bound, userRequest);
         mainSession.clear();
@@ -127,8 +138,35 @@ public class DiagnosticContext {
         return DiagnosticPrompts.backgroundFromMessages(mainSession);
     }
 
+    public String formatPriorSessionBlock() {
+        if (priorTurnSummaries.isEmpty()) {
+            return "";
+        }
+        return DiagnosticPrompts.backgroundFromMessages(priorTurnSummaries);
+    }
+
+    /** Frozen at route/stage entry; identical for {@link #prepareRouteStageContext()} and {@link #beginStage()}. */
+    public String formatSharedInvestigationBackground() {
+        return DiagnosticPrompts.sharedInvestigationBackground(
+                currentState, rawRequest, formatPriorSessionBlock());
+    }
+
+    public boolean isReportingEnabled() {
+        return reportStore != null;
+    }
+
+    /** Hint for TERMINATE when {@link #reportStore} is set; empty when reports are disabled. */
+    public String reportPersistHint() {
+        if (reportStore == null) {
+            return "";
+        }
+        boolean exists = reportStore.reportExists(sessionId, rawRequest);
+        return DiagnosticPrompts.reportPersistHint(
+                exists, reportStore.resolveDisplayPath(sessionId, rawRequest));
+    }
+
     public void beginStage() {
-        String backgroundSnapshot = snapshotMainSession();
+        String sharedBackground = formatSharedInvestigationBackground();
         currentStageConversationId =
                 STAGE_CONVERSATION_PREFIX + contextId + "-" + currentState.getStageCnt();
         ToolCallUserContext stageUserContext =
@@ -137,7 +175,7 @@ public class DiagnosticContext {
                 stageUserContext,
                 currentState.getCurrentStage(),
                 currentState.getCurrentStageThought(),
-                backgroundSnapshot);
+                sharedBackground);
     }
 
     public void endStage() {
@@ -176,11 +214,19 @@ public class DiagnosticContext {
         return currentState.getCurrentStage().shouldContinue();
     }
 
-    public BaseUserContext getRouteStageContext() {
+    /**
+     * Router context for the current {@code routeStage} call only. Prefix = shared background + route turn prompt; \
+     * does not retain prior routing turns.
+     */
+    public Context prepareRouteStageContext() {
         if (routeStageContext == null) {
-            routeStageContext = new BaseUserContext(ROUTE_CONVERSATION_PREFIX + contextId, sessionId, routeChatMemory);
-            routeStageContext.initializePromptPrefix(DiagnosticPrompts.ROUTER_SYSTEM, "");
+            routeStageContext = new Context(ROUTE_CONVERSATION_PREFIX + contextId, sessionId, routeChatMemory);
+            routeStageContext.setPromptRequest(rawRequest);
         }
+        routeStageContext.initializePromptPrefix(
+                DiagnosticPrompts.ROUTER_SYSTEM,
+                formatSharedInvestigationBackground(),
+                List.of(DiagnosticPrompts.routeTurnPrompt(currentState)));
         return routeStageContext;
     }
 

@@ -150,39 +150,48 @@ public final class ConversationLlmUsage {
     }
 
     private static void logTokenSummary(String label, TokenTotals totals, Map<String, TokenTotals> byTag) {
-        log.info(
-                "{} (prompt/completion/total): {}/{}/{}",
-                label,
-                totals.getPromptTokens(),
-                totals.getCompletionTokens(),
-                totals.getTotalTokens());
+        emitRunSummaryLine(
+                "%s (prompt/completion/total): %d/%d/%d"
+                        .formatted(
+                                label,
+                                totals.getPromptTokens(),
+                                totals.getCompletionTokens(),
+                                totals.getTotalTokens()));
         if (!byTag.isEmpty()) {
-            byTag.forEach((tag, usage) -> log.info(
-                    "{} [{}] (prompt/completion/total): {}/{}/{}",
-                    label,
-                    tag,
-                    usage.getPromptTokens(),
-                    usage.getCompletionTokens(),
-                    usage.getTotalTokens()));
+            byTag.forEach((tag, usage) -> emitRunSummaryLine(
+                    "%s [%s] (prompt/completion/total): %d/%d/%d"
+                            .formatted(
+                                    label,
+                                    tag,
+                                    usage.getPromptTokens(),
+                                    usage.getCompletionTokens(),
+                                    usage.getTotalTokens())));
         }
     }
 
     private static void logCacheSummary(String label, CacheTotals totals, Map<String, CacheTotals> byTag) {
-        log.info(
-                "{} (read/write/prompt-hit%): {}/{}/{}",
-                label,
-                totals.getCacheReadTokens(),
-                totals.getCacheWriteTokens(),
-                totals.formatHitRatePercent());
+        emitRunSummaryLine(
+                "%s (read/write/prompt-hit%%): %d/%d/%s"
+                        .formatted(
+                                label,
+                                totals.getCacheReadTokens(),
+                                totals.getCacheWriteTokens(),
+                                totals.formatHitRatePercent()));
         if (!byTag.isEmpty()) {
-            byTag.forEach((tag, usage) -> log.info(
-                    "{} [{}] (read/write/prompt-hit%): {}/{}/{}",
-                    label,
-                    tag,
-                    usage.getCacheReadTokens(),
-                    usage.getCacheWriteTokens(),
-                    usage.formatHitRatePercent()));
+            byTag.forEach((tag, usage) -> emitRunSummaryLine(
+                    "%s [%s] (read/write/prompt-hit%%): %d/%d/%s"
+                            .formatted(
+                                    label,
+                                    tag,
+                                    usage.getCacheReadTokens(),
+                                    usage.getCacheWriteTokens(),
+                                    usage.formatHitRatePercent())));
         }
+    }
+
+    private static void emitRunSummaryLine(String line) {
+        log.debug("{}", line);
+        Shower.LLM_USAGE.showCompact(line);
     }
 
     private static Map<String, TokenTotals> deltaTokensByTag(

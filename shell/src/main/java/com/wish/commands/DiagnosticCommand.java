@@ -29,20 +29,25 @@ public class DiagnosticCommand {
             @Option(longName = "model", shortName = 'm', description = "Model: sensenova", defaultValue = "sensenova")
                     String model,
             @Option(
-                            longName = "conversation-id",
-                            shortName = 'c',
+                            longName = "session",
+                            shortName = 's',
                             description = "Reuse investigation session across requests (same shell process)")
-                    String conversationId) {
-        return diagnosticService.run(prompt, model, conversationId);
+                    String sessionId,
+            @Option(
+                            longName = "reports",
+                            description =
+                                    "Persist incident report for this request (true/false; overrides janus.diagnostic.reports-enabled)")
+                    Boolean reports) {
+        return diagnosticService.run(prompt, model, sessionId, reports);
     }
 
-    @Command(name = "clear-session", description = "Drop cached diagnostic session for a conversation id")
+    @Command(name = "clear-session", description = "Drop cached diagnostic session")
     public void clearSession(
-            @Option(longName = "conversation-id", shortName = 'c', description = "Session id", required = true)
-                    String conversationId,
+            @Option(longName = "session", shortName = 's', description = "Session id", required = true)
+                    String sessionId,
             @Option(longName = "model", shortName = 'm', description = "Model: sensenova", defaultValue = "sensenova")
                     String model) {
-        diagnosticService.clearSession(conversationId, model);
+        diagnosticService.clearSession(sessionId, model);
     }
 
     @Command(name = "list-models", description = "List models available for diagnostic")

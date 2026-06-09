@@ -34,7 +34,7 @@ public class ToolCallSession extends Session<ToolCallUserContext> {
 
     @Override
     protected void initializeContext(ToolCallUserContext context, String request) {
-        bindSessionMessages(context);
+        attachPriorTurnSummaries(context);
     }
 
     @Override

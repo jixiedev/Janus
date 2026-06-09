@@ -3,8 +3,6 @@ package com.wish.loop;
 import com.wish.llm.LLMChatClient;
 import com.wish.model.stage.Stage;
 import com.wish.model.stage.StageContext;
-import org.apache.commons.lang3.tuple.Pair;
-
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -25,14 +23,12 @@ public class StageProcessor {
     }
 
     public void execute() {
-        Pair<String, String> stagePrompt = stageContext.prepareStagePrompt();
-        stageToolCallAgent.setSystemPrompt(stagePrompt.getLeft());
-        // Optimization: stage system + task user message precede variable background for prefix cache hits.
+        stageToolCallAgent.setSystemPrompt(stage.getSystemPrompt());
         String finding =
                 stageToolCallAgent.run(
                         stageContext.getBaseUserContext(),
-                        stagePrompt.getRight(),
-                        List.of(stageContext.stageBackgroundUserPrompt()));
+                        stageContext.getSharedInvestigationBackground(),
+                        stageContext.stageTurnPromptBlocks());
         stageContext.setStageFinding(finding == null ? "" : finding.trim());
     }
 }

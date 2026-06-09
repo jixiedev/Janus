@@ -481,7 +481,7 @@ flowchart LR
 
 - **当前任务紧贴 S**：同 session 内多次 request 时，system + 任务指令前缀尽量不变，仅尾部 snapshot / 历史变化。
 - **SESSION_HISTORY_FRAMING**：插在历史摘要前，用 Instruction/Context 声明「上文是当前任务，下文是背景」，避免续聊时把旧摘要当成新指令。
-- 诊断模块中，`DiagnosticPrompts.routeStageUserPrompt` 将 **稳定路由指令置前**、**main session snapshot 置后**，与上述策略一致。
+- 诊断模块中，Router 与 Stage **共用** `sharedInvestigationBackground`（user request + prior session + `state.desc()`）作为 primary user block；**route / stage 专用提示词**放在 trailing block，与上述「背景在前、任务在后」策略一致。
 
 实现：`core/src/main/java/com/wish/models/context/PromptPrefixLayout.java`。
 
@@ -493,15 +493,16 @@ flowchart LR
 
 | Context | 存储 | System（S） | 主要 User 内容 | 是否跨 step 持久 |
 |---------|------|-------------|----------------|------------------|
-| **Main session** | `DiagnosticContext.mainSession` | `DIAGNOSTIC_SYSTEM` | `initialIncidentPrompt`（U₀）+ 各阶段 `stageFindingMessage` | 写入 **Session** 摘要与 incident 报告 |
-| **Router** | `routeChatMemory`（独立 partition） | `ROUTER_SYSTEM` | 每轮 `routeStageUserPrompt` | **仅本轮 run**；`cleanupRun()` 清除 |
-| **Stage** | `stageChatMemory`（每阶段新 partition） | `Stage.systemPrompt` | `stageTaskUserPrompt` + `stageBackgroundUserPrompt`（trailing） | **仅本阶段**；`endStage()` 清除 |
+| **Main session** | `DiagnosticContext.mainSession`（`List<Message>`，非 ChatMemory） | `DIAGNOSTIC_SYSTEM` | `initialIncidentPrompt`（U₀）+ 各阶段 `stageFindingMessage` | 供 **Session 摘要**；不直接作为 Router/Stage 的 LLM 背景 |
+| **Router** | `routeChatMemory`（独立 partition） | `ROUTER_SYSTEM` | `sharedInvestigationBackground` + `routeTurnPrompt`（每轮 reset） | **单次 route 调用**；`prepareRouteStageContext()` 每轮重建 prefix，不保留上轮 route 对话 |
+| **Stage** | `stageChatMemory`（每阶段新 partition） | `Stage.systemPrompt` | `sharedInvestigationBackground` + `stageTaskUserPrompt`（+ report hint） | **仅本阶段**；`endStage()` 清除 |
 
 **边界原则**（见 `DiagnosticContext`）：
 
-- Stage 内 tool trace **不回写** main session，仅通过 **`submit_stage_finding`** 将阶段结论贡献给主会话。
-- Router 读取的 `mainSessionSnapshot` 是 **边界拷贝**，不进入 stage 的 ChatMemory。
-- 多轮 `-c` 时，prior turns 经 `PromptPrefixLayout` hydrate 到 main session **尾部**（framing 之后），与 core Agent 续聊策略一致。
+- **Router 与 Stage 共用同一套背景**：`formatSharedInvestigationBackground()`（user request、prior session 摘要、`State.desc()`），区别仅在 trailing 的 phase 提示词（`routeTurnPrompt` vs `stageTaskUserPrompt`）。
+- Stage 内 tool trace **不回写** main session，仅通过 **`submit_stage_finding`** 将阶段结论贡献给主会话与 `State`。
+- **Main session** 是调查叙事记录（供 Session 压缩），与 Router/Stage 的共享结构化背景职责分离。
+- 多轮 `-s` 时，prior turns 摘要编入 `sharedInvestigationBackground` 的 `Context — prior session` 段；`bootstrapMainSession` 亦将其 hydrate 到 main session 尾部。
 
 #### 调查循环与消息流
 
@@ -509,34 +510,41 @@ flowchart LR
 flowchart TB
     IN[用户 incident -p] --> BOOT[bootstrapMainSession]
     BOOT --> LOOP{shouldContinue?}
-    LOOP -->|是| RT[Router: ROUTER_SYSTEM + routeStageUserPrompt]
-    RT -->|router 工具| STG[Stage: Stage.systemPrompt + task + background]
+    LOOP -->|是| RT[Router: ROUTER_SYSTEM + sharedBackground + routeTurnPrompt]
+    RT -->|router 工具| STG[Stage: Stage.systemPrompt + sharedBackground + stageTask]
     STG -->|submit_stage_finding| FIND[contributeStageFinding → mainSession]
     FIND --> LOOP
     LOOP -->|否 TERMINATE/ERROR| OUT[buildRunResult]
     OUT --> SUM[endPrompt: SESSION_SUMMARY + incident 归档]
 ```
 
-单阶段内 prefix 顺序（`StageProcessor` + `ToolCallAgent.run`）：
+Router 每轮 prefix（`prepareRouteStageContext` + `PromptPrefixLayout`）：
 
 ```text
-S（Stage.systemPrompt）→ U₀（stageTaskUserPrompt）→ trailing（stageBackgroundUserPrompt）→ Uₙ/A/T（step loop）
+S（ROUTER_SYSTEM）→ U_shared（sharedInvestigationBackground）→ U_route（routeTurnPrompt）→ A/T（当轮 router 调用）
 ```
 
-与全局策略相同：**阶段任务指令（task）在前、可变 background snapshot 在后**，便于同一 stage 多 step 时 prefix cache 命中。
+Stage 内 prefix（`StageProcessor` + `ToolCallAgent.run`）：
+
+```text
+S（Stage.systemPrompt）→ U_shared（sharedInvestigationBackground）→ U_stage（stageTaskUserPrompt + report hint）→ Uₙ/A/T（step loop）
+```
+
+同一调查循环内，`routeStage` 与 `handleStage` 入口处的 `U_shared` **内容相同**（同一时刻的 `State`）。Router 每轮 reset，不累积历史 route 对话。
 
 #### `DiagnosticPrompts` 常量
 
-| 常量 | 用途 |
-|------|------|
+| 常量 / 方法 | 用途 |
+|-------------|------|
 | `DIAGNOSTIC_SYSTEM` | Main session 协调者角色；区分 problem type vs root cause |
 | `ROUTER_SYSTEM` | 阶段路由；仅允许调用 `router` 工具 |
-| `routeStageUserPrompt` | 每轮路由 user 消息（progress + snapshot） |
-| `initialIncidentPrompt` | 首次 incident 格式化为 U₀ |
-| `stageTaskUserPrompt` / `stageBackgroundUserPrompt` | 阶段任务与只读背景拆分 |
+| `sharedInvestigationBackground` | Router 与 Stage **共用**背景（user request、prior session、`state.desc()`） |
+| `routeTurnPrompt` | Route 专用 trailing（instruction + last stage outcome） |
+| `initialIncidentPrompt` | 首次 user request 格式化为 main session U₀ |
+| `stageTaskUserPrompt` | Stage 专用 trailing（stage 任务 + router 理由） |
 | `stageFindingMessage` | 阶段结论写回 main session 的 UserMessage 模板 |
 | `SESSION_SUMMARY_SYSTEM` | 多轮 Session 压缩（`DiagnosticSession`） |
-| `INCIDENT_REPORT_SUMMARY_SYSTEM` | 单次调查归档报告（`IncidentReportArchiver`） |
+| `reportPersistHint` / `persist_incident_report` | TERMINATE 阶段 LLM 驱动写入 `incident-report.md`（`IncidentReportTool`） |
 
 结构化工具名（Output 交付约定）：
 
@@ -546,6 +554,7 @@ S（Stage.systemPrompt）→ U₀（stageTaskUserPrompt）→ trailing（stageBa
 | `classify_incident` | CLASSIFY | **问题类型**（symptom，非根因）；enum 见 `IncidentCategory.catalogForPrompt()` |
 | `classify_root_cause` | COLLECT 及之后 | **根因**；可随证据更新；enum 见 `IncidentRootCause.catalogForPrompt()` |
 | `submit_stage_finding` | 各 Stage | 阶段可见产出（等同 Janus 的 `create_chat_completion`） |
+| `persist_incident_report` | TERMINATE（reports 开启时） | 创建/更新单份 markdown incident report 文件 |
 | `terminate` | 各 Stage | 结束本阶段 agent run |
 
 `StageToolCallAgent` 将 `directSessionResultTool` 设为 `submit_stage_finding`，摘要器优先取其输出，而非 assistant 正文。
@@ -566,19 +575,19 @@ S（Stage.systemPrompt）→ U₀（stageTaskUserPrompt）→ trailing（stageBa
 - **Problem type** 与 **root cause** 分阶段、分工具，避免 CLASSIFY 阶段过早归因。
 - enum 目录嵌入 Instruction（`Allowed problem types:` / `Allowed root causes:`），必要时可在 CLASSIFY 增加 few-shot 固定标签格式。
 
-#### 摘要与归档（双 Summarizer）
+#### 摘要与 incident report
 
-| 路径 | System prompt | 触发 | 产出 |
-|------|---------------|------|------|
-| Session 续聊 | `SESSION_SUMMARY_SYSTEM` | `DiagnosticSession.endPrompt` | ChatMemory 中 2 条摘要 / 轮 |
-| Incident 归档 | `INCIDENT_REPORT_SUMMARY_SYSTEM` | `IncidentReportArchiver.archiveRun` | `~/.janus/diagnostic-reports/` 下 `.md` / `.json` |
+| 路径 | 触发 | 产出 |
+|------|------|------|
+| Session 续聊 | `DiagnosticSession.endPrompt` + `SESSION_SUMMARY_SYSTEM` | ChatMemory 中 2 条摘要 / 轮（`PromptRunSummarizer`） |
+| Incident report 文件 | TERMINATE 阶段 agent 调用 `persist_incident_report` | `~/.janus/diagnostic-reports/` 下单份 `incident-report.md`（`IncidentReportStore`） |
 
-两者均通过 `PromptRunSummarizer` 生成；输入为 `getPromptMessagesForSummary()`（main session 本轮增量）+ run result，user 消息采用 **Instruction → Context → `Summary:`** 结构。
+Session 摘要输入为 `getPromptMessagesForSummary()`（main session 本轮增量）+ run result。Incident report 由 agent 在 TERMINATE 维护，服务结束时不自动归档；可用 `janus.diagnostic.reports-enabled` 或 `--reports` 开关。
 
 #### 修改诊断提示词时
 
-1. 路由类文案改 `DiagnosticPrompts`；阶段行为改 `Stage` enum 或 `Stage.nextStepPrompt()`。
-2. 保持 **snapshot / background 在 user 消息尾部**，并标注 `read-only`。
+1. 共享背景改 `sharedInvestigationBackground`；路由/阶段专用文案改 `routeTurnPrompt` / `stageTaskUserPrompt`；阶段行为改 `Stage` enum 或 `Stage.nextStepPrompt()`。
+2. 保持 **共享背景（primary）在前、phase 提示词（trailing）在后**；user request 与 persisted incident report 用语分离（前者 `user request`，后者 `incident report`）。
 3. 阶段结论必须经 **`submit_stage_finding`**，不要依赖 assistant-only 文本进入 main session。
 4. 跑 `diagnostic` 模块测试；core 侧 `PromptPrefixLayoutTest` 仍覆盖 shared prefix 逻辑。
 
@@ -592,7 +601,7 @@ S（Stage.systemPrompt）→ U₀（stageTaskUserPrompt）→ trailing（stageBa
 | 诊断主流程 / 路由 / 阶段文案 | `diagnostic/.../prompt/DiagnosticPrompts.java`、`model/stage/Stage.java` |
 | 诊断 Context 边界与 main session | `diagnostic/.../model/DiagnosticContext.java` |
 | 诊断执行循环 | `diagnostic/.../loop/DiagnosticAgent.java`、`StageProcessor.java`、`StageToolCallAgent.java` |
-| 诊断 Session / 报告归档 | `diagnostic/.../models/session/DiagnosticSession.java`、`models/report/IncidentReportArchiver.java` |
+| 诊断 Session / incident report | `diagnostic/.../models/session/DiagnosticSession.java`、`models/report/IncidentReportStore.java`、`tools/IncidentReportTool.java` |
 
 新增或修改提示词时：
 

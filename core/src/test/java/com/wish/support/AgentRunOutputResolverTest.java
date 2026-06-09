@@ -25,7 +25,7 @@ class AgentRunOutputResolverTest {
                                 "## Wish\n\nFounded 2010.")))
                         .build());
 
-        String text = AgentRunOutputResolver.findLastToolResponse(
+        String text = DirectToolResultResolver.lookupToolResponse(
                 chatMemory.get("conv"), BaseAgent.CREATE_CHAT_COMPLETION_TOOL_NAME);
 
         assertEquals("## Wish\n\nFounded 2010.", text);

@@ -1,11 +1,8 @@
 package com.wish.support;
 
-import com.wish.models.context.BaseUserContext;
+import com.wish.models.context.Context;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
-
 import java.util.List;
-import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,7 +25,7 @@ public final class AgentRunOutputResolver {
      * Picks the last step result that looks user-facing, using content heuristics only.
      * Agents with a dedicated result tool should override {@link com.wish.agent.base.BaseAgent#extractUserVisibleOutput}.
      */
-    public static String extractUserVisibleFromSteps(BaseUserContext context, List<String> stepResults) {
+    public static String extractUserVisibleFromSteps(Context context, List<String> stepResults) {
         if (stepResults != null) {
             for (int i = stepResults.size() - 1; i >= 0; i--) {
                 String body = stripStepPrefix(stepResults.get(i));
@@ -48,27 +45,10 @@ public final class AgentRunOutputResolver {
         return "No user-visible result captured.";
     }
 
+    /** @deprecated Prefer {@link DirectToolResultResolver#lookupToolResponse}. */
+    @Deprecated
     public static String findLastToolResponse(List<Message> messages, String toolName) {
-        if (messages == null || messages.isEmpty() || toolName == null || toolName.isBlank()) {
-            return null;
-        }
-        String normalized = toolName.toLowerCase(Locale.ROOT);
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            Message message = messages.get(i);
-            if (!(message instanceof ToolResponseMessage toolMessage)) {
-                continue;
-            }
-            for (ToolResponseMessage.ToolResponse response : toolMessage.getResponses()) {
-                if (response.name() != null
-                        && normalized.equals(response.name().toLowerCase(Locale.ROOT))) {
-                    String text = stringify(response.responseData());
-                    if (text != null && !text.isBlank()) {
-                        return text;
-                    }
-                }
-            }
-        }
-        return null;
+        return DirectToolResultResolver.lookupToolResponse(messages, toolName);
     }
 
     public static boolean isReadableStepContent(String text) {
@@ -136,7 +116,4 @@ public final class AgentRunOutputResolver {
         return first == '{' || first == '[';
     }
 
-    private static String stringify(Object data) {
-        return data == null ? null : data.toString();
-    }
 }

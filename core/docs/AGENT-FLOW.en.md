@@ -235,7 +235,7 @@ S → U₀ (current task) → trailing user blocks → session framing → prior
 
 - **Current task stays directly under S** so the system + task prefix stays stable within a session; only the tail (snapshots, history) changes.
 - **SESSION_HISTORY_FRAMING** sits before hydrated history and states that messages above are the current task and messages below are background only—reduces misreading old summaries as new instructions.
-- In diagnostic routing, stable routing instructions come **before** the main session snapshot.
+- In diagnostic, Router and Stage **share** `sharedInvestigationBackground` (user request + prior session + `state.desc()`) as the primary user block; **phase-specific prompts** (`routeTurnPrompt` / `stageTaskUserPrompt`) follow in trailing blocks.
 
 Implementation: `core/src/main/java/com/wish/models/context/PromptPrefixLayout.java`.
 
@@ -247,15 +247,16 @@ The diagnostic flow differs from a single-agent `run`: a **router + multiple sta
 
 | Context | Storage | System (S) | Main user content | Persists across steps |
 |---------|---------|------------|-------------------|------------------------|
-| **Main session** | `DiagnosticContext.mainSession` | `DIAGNOSTIC_SYSTEM` | `initialIncidentPrompt` (U₀) + `stageFindingMessage` per stage | **Session** summary + incident report |
-| **Router** | `routeChatMemory` (separate partition) | `ROUTER_SYSTEM` | `routeStageUserPrompt` each loop | **This run only**; cleared in `cleanupRun()` |
-| **Stage** | `stageChatMemory` (new partition per stage) | `Stage.systemPrompt` | `stageTaskUserPrompt` + `stageBackgroundUserPrompt` (trailing) | **This stage only**; cleared in `endStage()` |
+| **Main session** | `DiagnosticContext.mainSession` (`List<Message>`, not ChatMemory) | `DIAGNOSTIC_SYSTEM` | `initialIncidentPrompt` (U₀) + `stageFindingMessage` per stage | **Session summarization**; not the direct LLM background for Router/Stage |
+| **Router** | `routeChatMemory` (separate partition) | `ROUTER_SYSTEM` | `sharedInvestigationBackground` + `routeTurnPrompt` (reset each route) | **One route call**; `prepareRouteStageContext()` rebuilds prefix each turn; no accumulated route chat |
+| **Stage** | `stageChatMemory` (new partition per stage) | `Stage.systemPrompt` | `sharedInvestigationBackground` + `stageTaskUserPrompt` (+ report hint) | **This stage only**; cleared in `endStage()` |
 
 Boundary rules (`DiagnosticContext`):
 
-- Stage tool traces **do not** write back to main session; only **`submit_stage_finding`** contributes conclusions.
-- The router’s `mainSessionSnapshot` is a **boundary copy**, not stored in stage ChatMemory.
-- Multi-turn `-c` hydrates prior turns into the **tail** of main session (after framing), same as core agents.
+- **Router and Stage share the same background**: `formatSharedInvestigationBackground()` (user request, prior session summaries, `State.desc()`); only the trailing phase prompt differs (`routeTurnPrompt` vs `stageTaskUserPrompt`).
+- Stage tool traces **do not** write back to main session; only **`submit_stage_finding`** contributes conclusions to main session and `State`.
+- **Main session** is the narrative investigation record (for Session compression), separate from the shared structured background used by Router/Stage.
+- Multi-turn `-s` embeds prior turn summaries in `sharedInvestigationBackground` (`Context — prior session`); `bootstrapMainSession` also hydrates them into the tail of main session.
 
 #### Investigation loop
 
@@ -263,34 +264,41 @@ Boundary rules (`DiagnosticContext`):
 flowchart TB
     IN[user incident -p] --> BOOT[bootstrapMainSession]
     BOOT --> LOOP{shouldContinue?}
-    LOOP -->|yes| RT[Router: ROUTER_SYSTEM + routeStageUserPrompt]
-    RT -->|router tool| STG[Stage: Stage.systemPrompt + task + background]
+    LOOP -->|yes| RT[Router: ROUTER_SYSTEM + sharedBackground + routeTurnPrompt]
+    RT -->|router tool| STG[Stage: Stage.systemPrompt + sharedBackground + stageTask]
     STG -->|submit_stage_finding| FIND[contributeStageFinding → mainSession]
     FIND --> LOOP
     LOOP -->|no TERMINATE/ERROR| OUT[buildRunResult]
     OUT --> SUM[endPrompt: SESSION_SUMMARY + incident archive]
 ```
 
-Prefix order within one stage (`StageProcessor` + `ToolCallAgent.run`):
+Router prefix each turn (`prepareRouteStageContext` + `PromptPrefixLayout`):
 
 ```text
-S (Stage.systemPrompt) → U₀ (stageTaskUserPrompt) → trailing (stageBackgroundUserPrompt) → Uₙ/A/T (step loop)
+S (ROUTER_SYSTEM) → U_shared (sharedInvestigationBackground) → U_route (routeTurnPrompt) → A/T (this route call)
 ```
 
-Same global rule: **stable task instructions first**, variable background snapshot last—for prefix cache within a multi-step stage.
+Stage prefix (`StageProcessor` + `ToolCallAgent.run`):
+
+```text
+S (Stage.systemPrompt) → U_shared (sharedInvestigationBackground) → U_stage (stageTaskUserPrompt + report hint) → Uₙ/A/T (step loop)
+```
+
+Within one investigation loop iteration, `routeStage` and `handleStage` see the **same** `U_shared` (same `State` at that moment). Router memory resets each turn and does not accumulate prior route dialogue.
 
 #### `DiagnosticPrompts` constants
 
-| Constant | Role |
-|----------|------|
+| Constant / method | Role |
+|-------------------|------|
 | `DIAGNOSTIC_SYSTEM` | Main-session coordinator; separates problem type vs root cause |
 | `ROUTER_SYSTEM` | Stage routing; `router` tool only |
-| `routeStageUserPrompt` | Per-loop router user message (progress + snapshot) |
-| `initialIncidentPrompt` | Formats first incident as U₀ |
-| `stageTaskUserPrompt` / `stageBackgroundUserPrompt` | Stage task vs read-only background |
+| `sharedInvestigationBackground` | **Shared** Router/Stage background (user request, prior session, `state.desc()`) |
+| `routeTurnPrompt` | Route-specific trailing (instruction + last stage outcome) |
+| `initialIncidentPrompt` | Formats first user request as main-session U₀ |
+| `stageTaskUserPrompt` | Stage-specific trailing (stage task + router rationale) |
 | `stageFindingMessage` | Template when a stage finding is appended to main session |
 | `SESSION_SUMMARY_SYSTEM` | Multi-turn session compression (`DiagnosticSession`) |
-| `INCIDENT_REPORT_SUMMARY_SYSTEM` | Per-run archival report (`IncidentReportArchiver`) |
+| `reportPersistHint` / `persist_incident_report` | TERMINATE: LLM-driven `incident-report.md` (`IncidentReportTool`) |
 
 Structured tools (output contract):
 
@@ -300,6 +308,7 @@ Structured tools (output contract):
 | `classify_incident` | CLASSIFY | **Problem type** (symptom, not root cause); enum from `IncidentCategory.catalogForPrompt()` |
 | `classify_root_cause` | COLLECT onward | **Root cause**; updatable; enum from `IncidentRootCause.catalogForPrompt()` |
 | `submit_stage_finding` | Each stage | Stage deliverable (diagnostic equivalent of `create_chat_completion`) |
+| `persist_incident_report` | TERMINATE (when reports enabled) | Create/update single markdown incident report file |
 | `terminate` | Each stage | End stage agent run |
 
 `StageToolCallAgent` sets `directSessionResultTool` to `submit_stage_finding`; the summarizer prefers that over assistant text.
@@ -320,19 +329,19 @@ Classification design (Guide-style):
 - **Problem type** and **root cause** use separate stages and tools so CLASSIFY does not over-attribute root cause.
 - Enum catalogs are embedded in Instructions; add few-shot in CLASSIFY when label format must be exact.
 
-#### Dual summarization
+#### Summarization and incident report
 
-| Path | System prompt | When | Output |
-|------|---------------|------|--------|
-| Session continuation | `SESSION_SUMMARY_SYSTEM` | `DiagnosticSession.endPrompt` | 2 summary messages per turn in ChatMemory |
-| Incident archive | `INCIDENT_REPORT_SUMMARY_SYSTEM` | `IncidentReportArchiver.archiveRun` | `.md` / `.json` under `~/.janus/diagnostic-reports/` |
+| Path | When | Output |
+|------|------|--------|
+| Session continuation | `DiagnosticSession.endPrompt` + `SESSION_SUMMARY_SYSTEM` | 2 summary messages per turn in ChatMemory (`PromptRunSummarizer`) |
+| Incident report file | TERMINATE agent calls `persist_incident_report` | Single `incident-report.md` under `~/.janus/diagnostic-reports/` (`IncidentReportStore`) |
 
-Both use `PromptRunSummarizer` on `getPromptMessagesForSummary()` (main-session delta this run) + run result, with **Instruction → Context → `Summary:`** user messages.
+Session input: `getPromptMessagesForSummary()` (main-session delta this run) + run result. Incident report is maintained by the agent in TERMINATE, not auto-archived at service end; toggle via `janus.diagnostic.reports-enabled` or `--reports`.
 
 #### Editing diagnostic prompts
 
-1. Routing text → `DiagnosticPrompts`; stage behavior → `Stage` enum or `Stage.nextStepPrompt()`.
-2. Keep **snapshots / background at the tail** of user messages, labeled `read-only`.
+1. Shared background → `sharedInvestigationBackground`; phase prompts → `routeTurnPrompt` / `stageTaskUserPrompt`; stage behavior → `Stage` enum or `Stage.nextStepPrompt()`.
+2. Keep **shared background (primary) before phase prompts (trailing)**; separate **user request** (shell input) from **incident report** (persisted markdown file).
 3. Stage conclusions must go through **`submit_stage_finding`**, not assistant-only text into main session.
 4. Run `diagnostic` module tests; core `PromptPrefixLayoutTest` still covers shared prefix layout.
 
@@ -346,7 +355,7 @@ Both use `PromptRunSummarizer` on `getPromptMessagesForSummary()` (main-session 
 | Diagnostic prompts / stages | `diagnostic/.../prompt/DiagnosticPrompts.java`, `model/stage/Stage.java` |
 | Diagnostic context boundaries | `diagnostic/.../model/DiagnosticContext.java` |
 | Diagnostic execution loop | `diagnostic/.../loop/DiagnosticAgent.java`, `StageProcessor.java`, `StageToolCallAgent.java` |
-| Diagnostic session / reports | `diagnostic/.../models/session/DiagnosticSession.java`, `models/report/IncidentReportArchiver.java` |
+| Diagnostic session / incident report | `diagnostic/.../models/session/DiagnosticSession.java`, `models/report/IncidentReportStore.java`, `tools/IncidentReportTool.java` |
 
 When adding or editing prompts:
 

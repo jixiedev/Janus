@@ -4,19 +4,19 @@ import com.wish.models.context.ToolCallUserContext;
 import com.wish.prompt.DiagnosticPrompts;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang3.tuple.Pair;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Isolated execution scope for one diagnostic stage.
- * {@link #backgroundSnapshot} is a frozen copy of the main session at {@link com.wish.model.DiagnosticContext#beginStage()};
- * stage tool-call history lives only in {@link #baseUserContext} and never writes back except via
- * {@link #stageFinding} at stage end.
+ * {@link #sharedInvestigationBackground} matches {@link com.wish.model.DiagnosticContext#formatSharedInvestigationBackground()}
+ * at stage entry; stage tool-call history lives only in {@link #baseUserContext}.
  */
 public class StageContext {
     private final Stage stage;
     private final String llmThought;
-    /** Main-session snapshot at stage entry; not a live link to main ChatMemory. */
-    private final String backgroundSnapshot;
+    private final String sharedInvestigationBackground;
 
     @Getter
     private final ToolCallUserContext baseUserContext;
@@ -25,29 +25,35 @@ public class StageContext {
     @Setter
     private String stageFinding = "";
 
+    @Getter
+    @Setter
+    private String reportPersistHint = "";
+
     public StageContext(
             ToolCallUserContext baseUserContext,
             Stage stage,
             String llmThought,
-            String backgroundSnapshot) {
+            String sharedInvestigationBackground) {
         this.baseUserContext = baseUserContext;
         this.stage = stage;
         this.llmThought = llmThought;
-        this.backgroundSnapshot =
-                backgroundSnapshot == null || backgroundSnapshot.isBlank()
-                        ? "(no background yet)"
-                        : backgroundSnapshot;
+        this.sharedInvestigationBackground =
+                sharedInvestigationBackground == null || sharedInvestigationBackground.isBlank()
+                        ? "Context — structured progress:\n(empty)"
+                        : sharedInvestigationBackground.trim();
     }
 
-    /** @return pair of (systemPrompt, stageTaskUserPrompt) for {@link com.wish.agent.base.BaseAgent#run} */
-    public Pair<String, String> prepareStagePrompt() {
-        String system = stage.getSystemPrompt();
-        String task = DiagnosticPrompts.stageTaskUserPrompt(stage, llmThought);
-        return Pair.of(system, task);
+    public String getSharedInvestigationBackground() {
+        return sharedInvestigationBackground;
     }
 
-    /** Variable background block appended after the stage task user message (prompt-cache optimization). */
-    public String stageBackgroundUserPrompt() {
-        return DiagnosticPrompts.stageBackgroundUserPrompt(backgroundSnapshot);
+    /** Stage-phase prompts appended after {@link #getSharedInvestigationBackground()}. */
+    public List<String> stageTurnPromptBlocks() {
+        List<String> blocks = new ArrayList<>();
+        blocks.add(DiagnosticPrompts.stageTaskUserPrompt(stage, llmThought));
+        if (reportPersistHint != null && !reportPersistHint.isBlank()) {
+            blocks.add(reportPersistHint.trim());
+        }
+        return List.copyOf(blocks);
     }
 }

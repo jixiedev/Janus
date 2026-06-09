@@ -2,7 +2,7 @@ package com.wish.models.session;
 
 import com.wish.model.DiagnosticContext;
 import com.wish.models.context.DiagnosticRunContext;
-import com.wish.models.report.IncidentReportArchiver;
+import com.wish.models.report.IncidentReportStore;
 import com.wish.prompt.DiagnosticPrompts;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -35,21 +35,22 @@ import java.util.List;
 public class DiagnosticSession extends Session<DiagnosticRunContext> {
 
     private final PromptRunSummarizer summarizer;
-    private final IncidentReportArchiver reportArchiver;
+    private final IncidentReportStore reportStore;
 
-    public DiagnosticSession(String sessionId, ChatMemory chatMemory, ChatModel chatModel) {
+    public DiagnosticSession(
+            String sessionId, ChatMemory chatMemory, ChatModel chatModel, IncidentReportStore reportStore) {
         super(sessionId, chatMemory, true);
         this.summarizer =
                 new PromptRunSummarizer(
                         chatModel,
                         DiagnosticPrompts.SESSION_SUMMARY_SYSTEM,
                         DiagnosticPrompts.SUBMIT_STAGE_FINDING_TOOL);
-        this.reportArchiver = new IncidentReportArchiver(chatModel);
+        this.reportStore = reportStore;
     }
 
     /** Heuristic summarization only (tests). */
     DiagnosticSession(String sessionId, ChatMemory chatMemory) {
-        this(sessionId, chatMemory, null);
+        this(sessionId, chatMemory, null, null);
     }
 
     @Override
@@ -100,7 +101,6 @@ public class DiagnosticSession extends Session<DiagnosticRunContext> {
             super.endPrompt(runResult);
         } finally {
             if (diagnosticContext != null) {
-                reportArchiver.archiveRun(diagnosticContext, runResult);
                 diagnosticContext.cleanupRun();
             }
         }
@@ -108,7 +108,9 @@ public class DiagnosticSession extends Session<DiagnosticRunContext> {
 
     /** Writes a session-closure marker under the session reports directory. */
     public void archiveSessionClosed() {
-        reportArchiver.archiveSessionClosed(getSessionId());
+        if (reportStore != null) {
+            reportStore.archiveSessionClosed(getSessionId());
+        }
     }
 
     @Override

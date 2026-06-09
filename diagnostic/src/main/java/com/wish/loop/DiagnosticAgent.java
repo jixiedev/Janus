@@ -3,17 +3,14 @@ package com.wish.loop;
 import com.wish.llm.LLMChatClient;
 import com.wish.model.DiagnosticContext;
 import com.wish.model.stage.Stage;
-import com.wish.models.context.BaseUserContext;
-import com.wish.prompt.DiagnosticPrompts;
+import com.wish.model.stage.StageToolResolver;
+import com.wish.models.context.Context;
 import com.wish.support.DiagnosticProgressLogger;
 import com.wish.support.ToolCallingPromptSupport;
-import com.wish.tools.IncidentClassificationTool;
-import com.wish.tools.RootCauseClassificationTool;
 import com.wish.tools.StageRouter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -24,7 +21,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Multi-stage incident diagnostic loop. Per-stage tools come from {@link Stage#resolveTools(List)} only.
+ * Multi-stage incident diagnostic loop. Per-stage tools and hints are resolved in {@link StageToolResolver}.
  */
 @Slf4j
 public class DiagnosticAgent {
@@ -55,9 +52,7 @@ public class DiagnosticAgent {
 
     private void routeStage(DiagnosticContext context) {
         DiagnosticProgressLogger.logRoutingStart(context);
-        String routeStagePrompt = buildRouteStagePrompt(context);
-        BaseUserContext routeStageContext = context.getRouteStageContext();
-        routeStageContext.addMemory(new UserMessage(routeStagePrompt));
+        Context routeStageContext = context.prepareRouteStageContext();
 
         int stageCntBefore = context.currentState.getStageCnt();
         StageRouter router = new StageRouter(context.currentState);
@@ -73,7 +68,7 @@ public class DiagnosticAgent {
         if (!toolCalls.isEmpty()) {
             String thought = assistantMessage.getText();
             ToolExecutionResult result = toolCallingManager.executeToolCalls(
-                    ToolCallingPromptSupport.forToolExecution(response.getRight()), response.getLeft());
+                    ToolCallingPromptSupport.prepareExecuteToolCallsPrompt(response.getRight()), response.getLeft());
             routeStageContext.replaceMemory(result.conversationHistory());
             if (context.currentState.getStageCnt() > stageCntBefore) {
                 context.currentState.setCurrentStageThought(thought == null ? "" : thought.trim());
@@ -88,22 +83,12 @@ public class DiagnosticAgent {
         DiagnosticProgressLogger.logRoutingResult(context, usedFallback);
     }
 
-    private String buildRouteStagePrompt(DiagnosticContext context) {
-        return DiagnosticPrompts.routeStageUserPrompt(context.currentState, context.snapshotMainSession());
-    }
-
     private void handleStage(DiagnosticContext context) {
         Stage stage = context.currentState.getCurrentStage();
         context.beginStage();
-        List<Object> stageTools = new java.util.ArrayList<>();
         try {
-            stageTools.addAll(stage.resolveTools(registeredMcpTools));
-            if (stage == Stage.CLASSIFY) {
-                stageTools.add(new IncidentClassificationTool(context.currentState));
-            }
-            if (stage.allowsRootCauseClassification()) {
-                stageTools.add(new RootCauseClassificationTool(context.currentState));
-            }
+            List<Object> stageTools = StageToolResolver.resolveTools(stage, context, registeredMcpTools);
+            StageToolResolver.configureStageContext(stage, context, context.getCurrentStageContext());
             DiagnosticProgressLogger.logStageEnter(context, stage, stageTools);
             StageProcessor stageProcessor =
                     new StageProcessor(context.getCurrentStageContext(), stage, stageLlmClientSupplier, stageTools);

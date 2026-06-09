@@ -2,6 +2,7 @@ package com.wish.models.session;
 
 import com.wish.models.context.Context;
 import com.wish.models.context.PromptPrefixLayout;
+import com.wish.support.Shower;
 import lombok.Getter;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
@@ -81,14 +82,14 @@ public abstract class Session<T extends Context> {
         boolean extracted = false;
         try {
             if (persistent) {
-                showEndPromptProgressStart();
+                Shower.progressStart("end-prompt summarizing");
                 showedProgress = true;
                 extractToSessionMemory(context);
                 extracted = true;
             }
         } finally {
             if (showedProgress) {
-                showEndPromptProgressEnd(extracted);
+                Shower.progressEnd(extracted ? "done" : "failed");
             }
             // Optimization: keep only session memory across prompts; context partition is one-run scope.
             clearContextMemory(context);
@@ -113,9 +114,9 @@ public abstract class Session<T extends Context> {
         return messages == null ? List.of() : List.copyOf(messages);
     }
 
-    /** Binds prior session summaries on {@code target}; prefix order is applied in {@link Context#initializePromptPrefix}. */
-    protected void bindSessionMessages(Context target) {
-        target.bindSessionMessages(getSessionMessages());
+    /** Attaches prior-turn summaries on {@code target}; prefix order is applied in {@link Context#initializePromptPrefix}. */
+    protected void attachPriorTurnSummaries(Context target) {
+        target.setPriorTurnSummaries(getSessionMessages());
     }
 
     /**
@@ -139,16 +140,6 @@ public abstract class Session<T extends Context> {
 
     protected void clearContextMemory(T context) {
         chatMemory.clear(context.getConversation());
-    }
-
-    protected void showEndPromptProgressStart() {
-        System.out.print("[session] end-prompt summarizing... ");
-        System.out.flush();
-    }
-
-    protected void showEndPromptProgressEnd(boolean success) {
-        System.out.println(success ? "done" : "failed");
-        System.out.flush();
     }
 
     protected abstract T createContext(String contextId, String request);

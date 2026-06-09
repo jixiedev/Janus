@@ -1,6 +1,5 @@
 package com.wish.llm;
 
-import com.wish.models.context.BaseUserContext;
 import com.wish.models.context.Context;
 import com.wish.support.ToolCallingPromptSupport;
 import lombok.Getter;
@@ -25,7 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Stateless LLM facade: conversation state lives in {@link BaseUserContext}. */
+/** Stateless LLM facade: conversation state lives in {@link Context}. */
 public class LLMChatClient {
 
     @Getter
@@ -69,7 +68,7 @@ public class LLMChatClient {
         return List.copyOf(extraTools);
     }
 
-    public Pair<ChatResponse, Prompt> askWithTools(BaseUserContext userContext, List<String> newMessages, List<Object> tools) {
+    public Pair<ChatResponse, Prompt> askWithTools(Context userContext, List<String> newMessages, List<Object> tools) {
         return askWithTools(userContext, newMessages, tools, true);
     }
 
@@ -81,7 +80,7 @@ public class LLMChatClient {
      *                           inherit internal instructions and multi-turn context degrades.
      */
     public Pair<ChatResponse, Prompt> askWithTools(
-            BaseUserContext userContext, List<String> newMessages, List<Object> tools, boolean persistNewMessages) {
+            Context userContext, List<String> newMessages, List<Object> tools, boolean persistNewMessages) {
         List<Object> currentTools = new ArrayList<>();
         currentTools.addAll(defaultTools);
         currentTools.addAll(extraTools);

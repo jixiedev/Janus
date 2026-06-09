@@ -7,7 +7,8 @@ import java.util.List;
 
 /**
  * Diagnostic workflow stage. Routing via {@link com.wish.tools.StageRouter};
- * per-stage tools are declared here ({@link StageBuiltin} + {@link McpToolPolicy}).
+ * Static per-stage config lives here ({@link StageBuiltin} + {@link McpToolPolicy}).
+ * Runtime tool assembly and stage hints: {@link StageToolResolver}.
  */
 @Getter
 public enum Stage {
@@ -37,7 +38,7 @@ public enum Stage {
                     Rules:
                     - Do not assign categories such as infrastructure fault, misconfiguration, or vendor blame; \
                     those belong in later ANALYZE / VALIDATE stages after evidence.
-                    - Read the incident report and background.
+                    - Read the user request and background.
                     - Choose exactly one problem type from the allowed enum.
 
                     Output: Call classify_incident with the enum name and a short rationale tied to reported symptoms. \
@@ -115,7 +116,9 @@ public enum Stage {
 
                     Rules: Ensure classify_root_cause reflects the final best-supported root cause (update if needed).
 
-                    Output: Call submit_stage_finding with the full final report, then terminate(status="success").
+                    Output: When persist_incident_report is available, call it (create or update) with the full markdown \
+                    report before submit_stage_finding. Then call submit_stage_finding with a brief conclusion for the \
+                    investigation record, then terminate(status="success").
                     """),
     ERROR(
             "Error",

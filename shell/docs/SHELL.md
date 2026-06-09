@@ -145,16 +145,16 @@ shell:> swe request -p "在 workspace 下查看目录结构，并说明如何运
 ## 案例：事故调查（diagnostic）
 
 ```text
-shell:> diagnostic request -p "Airflow DAG daily_sales 今早 3 点失败，帮我调查根因" -m sensenova -c incident-1
+shell:> diagnostic request -p "Airflow DAG daily_sales 今早 3 点失败，帮我调查根因" -m sensenova -s incident-1
 ```
 
-多阶段流程（COLLECT → ANALYZE → VALIDATE → TERMINATE）；各 stage 可用工具在 `Stage` 枚举中配置（如 COLLECT/VALIDATE 含 `query_warehouse` + 全部 MCP，ANALYZE 仅 `query_warehouse`）。Trino 凭证：优先读工作目录或 `$HOME` 下的 `.presto_env`，否则用 `PRESTO_USER` / `PRESTO_PASSWORD` / `PRESTO_HOST`（或 `TRINO_*`、`PRESTO_JDBC_URL`）。同一 `-c` 可追问：
+多阶段流程（COLLECT → ANALYZE → VALIDATE → TERMINATE）；各 stage 可用工具在 `Stage` 枚举中配置（如 COLLECT/VALIDATE 含 `query_warehouse` + 全部 MCP，ANALYZE 仅 `query_warehouse`）。Trino 凭证：优先读工作目录或 `$HOME` 下的 `.presto_env`，否则用 `PRESTO_USER` / `PRESTO_PASSWORD` / `PRESTO_HOST`（或 `TRINO_*`、`PRESTO_JDBC_URL`）。同一 `-s` 可追问：
 
 ```text
-shell:> diagnostic request -p "下游表是否受影响？" -m sensenova -c incident-1
+shell:> diagnostic request -p "下游表是否受影响？" -m sensenova -s incident-1
 ```
 
-每次 `request` 结束会在报告目录写入本次 incident 总结（`.md` + `.json`）：默认 `~/.janus/diagnostic-reports/`；`-c session` 落在 `sessions/{sessionId}/`，无 `-c` 落在 `ephemeral/`。配置项 `janus.diagnostic.reports-dir` 或环境变量 `JANUS_DIAGNOSTIC_REPORTS_DIR`。清除会话（`clear-session`）时会在该 session 目录下追加关闭标记文件。
+启用 report 时，agent 在 TERMINATE 阶段通过 `persist_incident_report` 维护单份 `incident-report.md`：默认 `~/.janus/diagnostic-reports/`；有 `-s` 落在 `sessions/{sessionId}/`，无 `-s` 落在 `ephemeral/{slug}/`。全局开关 `janus.diagnostic.reports-enabled`，单次可覆盖 `--reports true|false`。清除会话（`diagnostic clear-session -s <id>`）时会在该 session 目录下追加关闭标记文件。
 
 ---
 

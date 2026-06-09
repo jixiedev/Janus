@@ -4,6 +4,7 @@ import com.wish.agent.base.BaseAgent;
 import com.wish.models.AgentState;
 import com.wish.models.context.BaseFlowUserContext;
 import com.wish.models.context.BaseUserContext;
+import com.wish.models.context.Context;
 import com.wish.models.context.PlanningFlowUserContext;
 import com.wish.llm.LLMChatClient;
 import com.wish.support.Shower;
@@ -248,7 +249,7 @@ public class PlanningFlow extends BaseFlow {
         log.info("Creating initial plan with ID: {}", planId);
 
         String systemPrompt = buildPlanningSystemPrompt();
-        BaseUserContext planningContext = context.getInitializeContext();
+        Context planningContext = context.getInitializeContext();
         planningContext.initializePromptPrefix(
                 systemPrompt, INITIAL_REQUEST_PROMPT_FORMAT.formatted(request, planId));
 
@@ -262,7 +263,7 @@ public class PlanningFlow extends BaseFlow {
 
         if (!toolCalls.isEmpty()) {
             ToolExecutionResult result = toolCallingManager.executeToolCalls(
-                    ToolCallingPromptSupport.forToolExecution(response.getRight()), response.getLeft());
+                    ToolCallingPromptSupport.prepareExecuteToolCallsPrompt(response.getRight()), response.getLeft());
             planningContext.replaceMemory(result.conversationHistory());
             if (planTool.hasPlan(planId)) {
                 log.info("Plan {} created via planning tool", planId);
@@ -309,7 +310,7 @@ public class PlanningFlow extends BaseFlow {
         String planText = planTool.hasPlan(planId) ? planTool.getPlan(planId).format() : "Plan " + planId + " not found.";
 
         try {
-            BaseUserContext planningContext = context.getFinalizeContext();
+            Context planningContext = context.getFinalizeContext();
             planningContext.initializePromptPrefix(
                     FINALIZE_PLAN_SYSTEM_PROMPT, FINALIZE_PLAN_USER_PROMPT_FORMAT.formatted(planText));
             Pair<ChatResponse, Prompt> response = llmChatClient.askWithTools(planningContext, List.of(), List.of());

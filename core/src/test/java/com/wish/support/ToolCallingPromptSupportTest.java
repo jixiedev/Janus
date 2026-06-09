@@ -13,13 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ToolCallingPromptSupportTest {
 
     @Test
-    void forToolExecutionFillsEmptyToolContext() {
+    void prepareExecuteToolCallsPromptFillsEmptyToolContext() {
         ToolCallingChatOptions options = ToolCallingChatOptions.builder()
                 .internalToolExecutionEnabled(false)
                 .build();
         Prompt original = new Prompt(List.of(new UserMessage("hi")), options);
 
-        Prompt execution = ToolCallingPromptSupport.forToolExecution(original);
+        Prompt execution = ToolCallingPromptSupport.prepareExecuteToolCallsPrompt(original);
 
         assertTrue(execution.getOptions() instanceof ToolCallingChatOptions);
         ToolCallingChatOptions toolOptions = (ToolCallingChatOptions) execution.getOptions();

@@ -1,7 +1,7 @@
 package com.wish.models.session;
 
 import com.wish.agent.base.BaseAgent;
-import com.wish.support.AgentRunOutputResolver;
+import com.wish.support.DirectToolResultResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -26,7 +26,6 @@ import java.util.List;
 public class PromptRunSummarizer {
 
     private static final int MAX_TOOL_SNIPPET_CHARS = 800;
-    private static final int MAX_RUN_RESULT_CHARS = 4_000;
     private static final int MAX_DIRECT_RESULT_CHARS = 16_000;
 
     private final ChatModel chatModel;
@@ -56,7 +55,7 @@ public class PromptRunSummarizer {
             return new PromptRunSummary("", "");
         }
 
-        String direct = extractDirectResult(promptMessages, runResult);
+        String direct = new DirectOutcomeResolver(directResultToolName, runResult).extract(promptMessages);
         if (direct != null && !direct.isBlank()) {
             return new PromptRunSummary(request, truncate(direct, MAX_DIRECT_RESULT_CHARS));
         }
@@ -74,23 +73,6 @@ public class PromptRunSummarizer {
 
         String fallback = fallbackResult(promptMessages, runResult);
         return new PromptRunSummary(request, fallback);
-    }
-
-    private String extractDirectResult(List<Message> promptMessages, String runResult) {
-        if (directResultToolName != null) {
-            String fromTool = AgentRunOutputResolver.findLastToolResponse(promptMessages, directResultToolName);
-            if (fromTool != null && !fromTool.isBlank()) {
-                return fromTool;
-            }
-        }
-        String assistant = findLastAssistantText(promptMessages);
-        if (assistant != null && !assistant.isBlank()) {
-            return assistant;
-        }
-        if (runResult != null && !runResult.isBlank() && runResult.length() <= MAX_RUN_RESULT_CHARS) {
-            return runResult.trim();
-        }
-        return null;
     }
 
     private String summarizeWithModel(String userRequest, List<Message> promptMessages, String runResult) {
@@ -119,12 +101,9 @@ public class PromptRunSummarizer {
     }
 
     private static String fallbackResult(List<Message> promptMessages, String runResult) {
-        if (runResult != null && !runResult.isBlank()) {
-            return truncate(runResult.trim(), MAX_RUN_RESULT_CHARS);
-        }
-        String assistant = findLastAssistantText(promptMessages);
-        if (assistant != null && !assistant.isBlank()) {
-            return assistant;
+        String fallback = new DirectOutcomeResolver(null, runResult).extractFallback(promptMessages);
+        if (fallback != null && !fallback.isBlank()) {
+            return fallback;
         }
         return "Task ended without a captured result.";
     }
@@ -150,7 +129,7 @@ public class PromptRunSummarizer {
             }
         }
         if (runResult != null && !runResult.isBlank()) {
-            appendLine(builder, "Run steps", truncate(runResult.trim(), MAX_RUN_RESULT_CHARS));
+            appendLine(builder, "Run steps", truncate(runResult.trim(), DirectOutcomeResolver.MAX_RUN_RESULT_CHARS));
         }
         return builder.isEmpty() ? "(empty trace)" : builder.toString();
     }
@@ -165,19 +144,6 @@ public class PromptRunSummarizer {
         builder.append(role).append(": ").append(truncate(text.trim(), MAX_TOOL_SNIPPET_CHARS));
     }
 
-    private static String findLastAssistantText(List<Message> messages) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            Message message = messages.get(i);
-            if (message instanceof AssistantMessage assistant) {
-                String text = assistant.getText();
-                if (text != null && !text.isBlank()) {
-                    return text;
-                }
-            }
-        }
-        return null;
-    }
-
     private static String stringify(Object data) {
         return data == null ? null : data.toString();
     }
@@ -187,5 +153,46 @@ public class PromptRunSummarizer {
             return text;
         }
         return text.substring(0, maxChars) + "…";
+    }
+
+    /** Session-memory direct outcome before optional LLM summarization. */
+    private static final class DirectOutcomeResolver extends DirectToolResultResolver {
+
+        static final int MAX_RUN_RESULT_CHARS = 4_000;
+
+        private final String runResult;
+
+        DirectOutcomeResolver(String registeredToolName, String runResult) {
+            super(registeredToolName);
+            this.runResult = runResult;
+        }
+
+        @Override
+        protected String extractFallback(List<Message> messages) {
+            String assistant = findLastAssistantText(messages);
+            if (assistant != null && !assistant.isBlank()) {
+                return assistant.trim();
+            }
+            if (runResult != null && !runResult.isBlank() && runResult.length() <= MAX_RUN_RESULT_CHARS) {
+                return runResult.trim();
+            }
+            return null;
+        }
+
+        private static String findLastAssistantText(List<Message> messages) {
+            if (messages == null || messages.isEmpty()) {
+                return null;
+            }
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                Message message = messages.get(i);
+                if (message instanceof AssistantMessage assistant) {
+                    String text = assistant.getText();
+                    if (text != null && !text.isBlank()) {
+                        return text;
+                    }
+                }
+            }
+            return null;
+        }
     }
 }

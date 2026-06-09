@@ -29,26 +29,26 @@ public final class PromptPrefixLayout {
 
     /**
      * @param systemPrompt agent or phase system text (may be blank)
-     * @param sessionMessages summarized prior turns from {@link com.wish.models.session.Session}
+     * @param priorTurnSummaries summarized prior turns from {@link com.wish.models.session.Session}
      * @param primaryUserRequest current shell/API task
      * @param trailingUserBlocks variable background appended after the primary task, before session history
      */
     public static List<Message> build(
             String systemPrompt,
-            List<Message> sessionMessages,
+            List<Message> priorTurnSummaries,
             String primaryUserRequest,
             List<String> trailingUserBlocks) {
         List<Message> messages = new ArrayList<>();
         appendSystem(messages, systemPrompt);
         appendUser(messages, primaryUserRequest);
         appendTrailingUsers(messages, trailingUserBlocks);
-        appendSessionHistory(messages, sessionMessages);
+        appendSessionHistory(messages, priorTurnSummaries);
         return List.copyOf(messages);
     }
 
     public static List<Message> build(
-            String systemPrompt, List<Message> sessionMessages, String primaryUserRequest) {
-        return build(systemPrompt, sessionMessages, primaryUserRequest, List.of());
+            String systemPrompt, List<Message> priorTurnSummaries, String primaryUserRequest) {
+        return build(systemPrompt, priorTurnSummaries, primaryUserRequest, List.of());
     }
 
     private static void appendSystem(List<Message> messages, String systemPrompt) {
@@ -74,11 +74,11 @@ public final class PromptPrefixLayout {
         }
     }
 
-    private static void appendSessionHistory(List<Message> messages, List<Message> sessionMessages) {
-        if (sessionMessages == null || sessionMessages.isEmpty()) {
+    private static void appendSessionHistory(List<Message> messages, List<Message> priorTurnSummaries) {
+        if (priorTurnSummaries == null || priorTurnSummaries.isEmpty()) {
             return;
         }
         messages.add(new UserMessage(SESSION_HISTORY_FRAMING));
-        messages.addAll(sessionMessages);
+        messages.addAll(priorTurnSummaries);
     }
 }

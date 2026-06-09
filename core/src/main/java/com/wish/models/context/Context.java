@@ -4,7 +4,10 @@ import com.wish.support.ConversationLlmUsage;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 
 import java.util.List;
@@ -25,15 +28,16 @@ public class Context {
     protected final ConversationLlmUsage llmUsage = new ConversationLlmUsage();
 
     /**
-     * Summarized prior turns bound at {@link #beginPrompt} for the next prefix assembly.
-     * Optimization: session content is supplied here; ordering is applied in {@link #initializePromptPrefix}.
+     * Compressed user/agent pairs from earlier prompt runs in the same session ({@code session:{id}}).
+     * Hydrated at {@link com.wish.models.session.Session#beginPrompt} for read-only background in
+     * {@link #initializePromptPrefix}; ordering is applied in {@link PromptPrefixLayout}.
      */
-    private List<Message> boundSessionMessages = List.of();
+    @Getter
+    private List<Message> priorTurnSummaries = List.of();
 
     /**
      * Start index in chat memory for the current prompt run (set by {@link #initializePromptPrefix}).
-     * Skipped by {@link com.wish.models.session.Session#endPrompt} summarization via
-     * {@link BaseUserContext#getPromptMessages()}.
+     * Skipped by {@link com.wish.models.session.Session#endPrompt} summarization via {@link #getPromptMessages()}.
      */
     @Getter
     @Setter
@@ -60,17 +64,11 @@ public class Context {
     }
 
     /**
-     * Binds prior session summaries for this prompt run (typically from {@link com.wish.models.session.Session}).
+     * Attaches summarized prior turns for this prompt run (typically from {@link com.wish.models.session.Session}).
      */
-    public void bindSessionMessages(List<Message> sessionMessages) {
-        boundSessionMessages =
-                sessionMessages == null || sessionMessages.isEmpty()
-                        ? List.of()
-                        : List.copyOf(sessionMessages);
-    }
-
-    protected List<Message> getBoundSessionMessages() {
-        return boundSessionMessages;
+    public void setPriorTurnSummaries(List<Message> summaries) {
+        priorTurnSummaries =
+                summaries == null || summaries.isEmpty() ? List.of() : List.copyOf(summaries);
     }
 
     /**
@@ -83,7 +81,7 @@ public class Context {
             String systemPrompt, String primaryUserRequest, List<String> trailingUserBlocks) {
         List<Message> prefix =
                 PromptPrefixLayout.build(
-                        systemPrompt, boundSessionMessages, primaryUserRequest, trailingUserBlocks);
+                        systemPrompt, priorTurnSummaries, primaryUserRequest, trailingUserBlocks);
         chatMemory.clear(conversation);
         if (!prefix.isEmpty()) {
             chatMemory.add(conversation, prefix);
@@ -106,5 +104,59 @@ public class Context {
     /** Immutable view of token and prompt-cache usage accumulated on this context partition. */
     public ConversationLlmUsage snapshotLlmUsage() {
         return llmUsage.snapshot();
+    }
+
+    public void addUserMemory(String memory) {
+        chatMemory.add(conversation, new UserMessage(memory));
+    }
+
+    public void addSystemMemory(String memory) {
+        chatMemory.add(conversation, new SystemMessage(memory));
+    }
+
+    public void replaceMemory(List<Message> messages) {
+        chatMemory.clear(conversation);
+        if (messages != null && !messages.isEmpty()) {
+            chatMemory.add(conversation, messages);
+        }
+    }
+
+    public void addMemory(Message message) {
+        chatMemory.add(conversation, message);
+    }
+
+    public List<Message> getAllMessages() {
+        return chatMemory.get(conversation);
+    }
+
+    /**
+     * Messages produced during this prompt run (excludes the assembled prefix).
+     * Used as input to session summarization; excludes ephemeral nextStepPrompt when
+     * {@link com.wish.llm.LLMChatClient#askWithTools} is called with {@code persistNewMessages=false}.
+     */
+    public List<Message> getPromptMessages() {
+        List<Message> messages = getAllMessages();
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+        int from = getPromptRunStartIndex();
+        if (from >= messages.size()) {
+            return List.of();
+        }
+        return List.copyOf(messages.subList(from, messages.size()));
+    }
+
+    public String getLastAssistantText() {
+        List<Message> messages = chatMemory.get(conversation);
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message message = messages.get(i);
+            if (message instanceof AssistantMessage assistant) {
+                String text = assistant.getText();
+                if (text != null && !text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return "";
     }
 }

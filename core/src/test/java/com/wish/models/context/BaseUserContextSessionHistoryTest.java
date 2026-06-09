@@ -14,7 +14,7 @@ class BaseUserContextSessionHistoryTest {
     void initializePromptPrefix_loadsCanonicalOrderIntoMemory() {
         var chatMemory = MessageWindowChatMemory.builder().build();
         BaseUserContext context = new BaseUserContext("ctx", chatMemory);
-        context.bindSessionMessages(
+        context.setPriorTurnSummaries(
                 java.util.List.of(new UserMessage("prior"), new AssistantMessage("answer")));
 
         context.initializePromptPrefix("system", "current task");

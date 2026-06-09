@@ -9,6 +9,7 @@ import com.wish.model.state.State;
 public final class DiagnosticPrompts {
 
     public static final String SUBMIT_STAGE_FINDING_TOOL = "submit_stage_finding";
+    public static final String PERSIST_INCIDENT_REPORT_TOOL = "persist_incident_report";
     public static final String CLASSIFY_INCIDENT_TOOL = "classify_incident";
     public static final String CLASSIFY_ROOT_CAUSE_TOOL = "classify_root_cause";
 
@@ -26,22 +27,23 @@ public final class DiagnosticPrompts {
             Rules: Use the same language as the user's request. Omit raw tool logs.
             """;
 
-    public static final String INCIDENT_REPORT_SUMMARY_SYSTEM = """
-            Instruction: Write a concise incident report for archival storage after a diagnostic investigation.
-
-            Input: Investigation context will follow in the user message.
-
-            Output: Include:
-            - User request
-            - Problem type
-            - Root cause (if known)
-            - Key evidence by stage
-            - Final conclusion
-            - Impact
-            - Recommended actions
-
-            Rules: Use the same language as the user's request. Do not invent facts. Omit raw tool logs.
-            """;
+    public static String reportPersistHint(boolean reportExists, String targetPath) {
+        if (reportExists) {
+            return """
+                    Instruction: Incident report persistence is enabled.
+                    An incident report already exists at: %s
+                    Before submit_stage_finding, call persist_incident_report with action=update and the full revised markdown report.
+                    """
+                    .formatted(targetPath);
+        }
+        return """
+                Instruction: Incident report persistence is enabled.
+                No incident report file exists yet for this session.
+                Before submit_stage_finding, call persist_incident_report with action=create and the full markdown report.
+                Target path: %s
+                """
+                .formatted(targetPath);
+    }
 
     private DiagnosticPrompts() {}
 
@@ -80,49 +82,46 @@ public final class DiagnosticPrompts {
             """;
 
     /**
-     * Per-turn router user message. {@code mainSessionSnapshot} is a boundary copy from the main session;
-     * it must not be persisted as part of stage chat history.
+     * Shared investigation background for {@code routeStage} and {@code handleStage}.
+     * Loaded as the primary user block; phase-specific prompts follow in trailing blocks.
      */
-    public static String routeStageUserPrompt(State state, String mainSessionSnapshot) {
-        String lastStageLine = "none (this is the first routing decision)";
-        String lastFindingLine = "none";
-        if (!state.getStageFindings().isEmpty()) {
-            var last = state.getStageFindings().getLast();
-            lastStageLine = last.getLeft().getName();
-            lastFindingLine = last.getRight();
+    public static String sharedInvestigationBackground(
+            State state, String userRequest, String priorSessionBlock) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Context — user request:\n");
+        sb.append(userRequest == null || userRequest.isBlank() ? "(none)" : userRequest.trim());
+        String prior = priorSessionBlock == null ? "" : priorSessionBlock.trim();
+        if (!prior.isEmpty()) {
+            sb.append("\n\nContext — prior session:\n").append(prior);
         }
-        String snapshot =
-                mainSessionSnapshot == null || mainSessionSnapshot.isBlank()
-                        ? "(no main session content yet)"
-                        : mainSessionSnapshot.trim();
-        // Optimization: stable routing instructions first; variable main-session snapshot at the tail.
+        sb.append("\n\nContext — structured progress:\n").append(state.desc());
+        return sb.toString();
+    }
+
+    /** Route-phase prompt appended after {@link #sharedInvestigationBackground}. */
+    public static String routeTurnPrompt(State state) {
         return """
                 Instruction: Choose the next investigation stage by calling `router` with the stage name. \
                 Do not answer in plain text.
 
-                Context — structured progress:
-                %s
-
-                Context — last completed stage: %s
-                Context — last stage finding: %s
-                Context — current stage marker (before your choice): %s
-
-                Input — main session snapshot (read-only):
-                %s
+                Context — last stage outcome: %s
                 """
-                .formatted(
-                        state.desc(),
-                        lastStageLine,
-                        lastFindingLine,
-                        state.getCurrentStage().getName(),
-                        snapshot);
+                .formatted(formatLastStageOutcome(state));
+    }
+
+    private static String formatLastStageOutcome(State state) {
+        if (state.getStageFindings().isEmpty()) {
+            return "none (first routing decision)";
+        }
+        var last = state.getStageFindings().getLast();
+        return "after stage " + last.getLeft().getName() + ": " + last.getRight();
     }
 
     public static String initialIncidentPrompt(String rawRequest) {
         return """
                 Instruction: Begin routing to the appropriate first stage (typically CLASSIFY, then COLLECT).
 
-                Input — incident report (user request):
+                Input — user request:
                 %s
                 """
                 .formatted(rawRequest == null ? "" : rawRequest.trim());
@@ -144,23 +143,6 @@ public final class DiagnosticPrompts {
                 %s
                 """
                 .formatted(stage.getName(), thoughtBlock, rootCauseToolHint(stage));
-    }
-
-    /** Variable investigation background; appended after {@link #stageTaskUserPrompt} for cache-friendly ordering. */
-    public static String stageBackgroundUserPrompt(String backgroundBlock) {
-        String background =
-                backgroundBlock == null || backgroundBlock.isBlank()
-                        ? "(no background yet)"
-                        : backgroundBlock.trim();
-        return """
-                Context — investigation background (main session snapshot at stage entry — read-only):
-                %s
-                """
-                .formatted(background);
-    }
-
-    public static String stageUserPrompt(Stage stage, String routerThought, String backgroundBlock) {
-        return stageTaskUserPrompt(stage, routerThought) + "\n\n" + stageBackgroundUserPrompt(backgroundBlock);
     }
 
     private static String rootCauseToolHint(Stage stage) {
