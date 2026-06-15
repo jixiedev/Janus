@@ -38,6 +38,10 @@ class IncidentReportStoreTest {
             assertTrue(content.contains("ORCHESTRATION"));
             assertTrue(content.contains("daily_sales"));
             assertTrue(content.contains("## Conclusion"));
+
+            Path indexPath = reportsRoot.resolve(IncidentReportIndex.INDEX_FILENAME);
+            assertTrue(Files.exists(indexPath));
+            assertEquals(1, new IncidentReportIndex().readAll().size());
         } finally {
             System.clearProperty(IncidentReportPaths.PROPERTY);
         }

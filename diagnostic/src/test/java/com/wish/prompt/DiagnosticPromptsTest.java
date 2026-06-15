@@ -7,6 +7,8 @@ import com.wish.model.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.UserMessage;
 
+import java.time.Instant;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,11 +22,35 @@ class DiagnosticPromptsTest {
                 DiagnosticPrompts.sharedInvestigationBackground(
                         state, "check DAG", "User: prior\n\nAssistant: upstream delay.");
 
+        assertTrue(background.contains("Context — investigation time (UTC):"));
         assertTrue(background.indexOf("Context — user request:") < background.indexOf("Context — prior session:"));
         assertTrue(background.indexOf("Context — prior session:") < background.indexOf("Context — structured progress:"));
         assertTrue(background.contains("check DAG"));
         assertTrue(background.contains("upstream delay"));
         assertTrue(background.contains("Problem: pipeline failure"));
+    }
+
+    @Test
+    void reportPersistHintRequiresIncidentTimeRules() {
+        String hint = DiagnosticPrompts.reportPersistHint(false, "/tmp/incident-report.md");
+
+        assertTrue(hint.contains("Incident time (required"));
+        assertTrue(hint.contains("Last occurrence"));
+        assertTrue(hint.contains("User scope first"));
+        assertTrue(hint.contains("NOT when the investigation started"));
+    }
+
+    @Test
+    void sharedInvestigationBackgroundUsesFixedInvestigationClock() {
+        State state = new State();
+        String background =
+                DiagnosticPrompts.sharedInvestigationBackground(
+                        state,
+                        "最近两天失败",
+                        "",
+                        Instant.parse("2026-06-10T09:00:00Z"));
+
+        assertTrue(background.contains("Context — investigation time (UTC): 2026-06-10T09:00:00Z"));
     }
 
     @Test

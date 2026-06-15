@@ -5,6 +5,7 @@ import com.wish.models.report.IncidentReportStore;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
+import static com.wish.prompt.DiagnosticPrompts.INCIDENT_REPORT_MARKDOWN_PARAM_DESCRIPTION;
 import static com.wish.prompt.DiagnosticPrompts.PERSIST_INCIDENT_REPORT_TOOL;
 
 /**
@@ -26,18 +27,14 @@ public class IncidentReportTool {
             description =
                     "Persist the incident report for this investigation session. "
                             + "Use action=create for the first report, action=update to revise an existing report "
-                            + "(e.g. follow-up conversations). Provide complete markdown; omit markdown only if you "
-                            + "want a structured draft from investigation state.")
+                            + "(e.g. follow-up conversations). Markdown must include incident occurrence time per "
+                            + "report rules; omit markdown only for a structured state draft.")
     public String persistIncidentReport(
             @ToolParam(
                             description = "create: write the first report; update: replace the existing session report",
                             required = true)
                     String action,
-            @ToolParam(
-                            description =
-                                    "Full incident report in markdown (summary, impact, recommended actions). "
-                                            + "Leave blank to use a structured draft from collected findings.",
-                            required = false)
+            @ToolParam(description = INCIDENT_REPORT_MARKDOWN_PARAM_DESCRIPTION, required = false)
                     String markdown) {
         return store.persist(context, action, markdown);
     }

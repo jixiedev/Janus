@@ -36,6 +36,11 @@ public final class IncidentReportBuilder {
         sb.append("# Incident report\n\n");
         sb.append("## Metadata\n\n");
         sb.append("- **Updated**: ").append(TIMESTAMP.format(Instant.now())).append('\n');
+        if (state.getIncidentOccurredAt() != null) {
+            sb.append("- **Incident last occurred (classified)**: ")
+                    .append(TIMESTAMP.format(state.getIncidentOccurredAt()))
+                    .append('\n');
+        }
         if (context.getSessionId() != null && !context.getSessionId().isBlank()) {
             sb.append("- **Session**: ").append(context.getSessionId().trim()).append('\n');
         }

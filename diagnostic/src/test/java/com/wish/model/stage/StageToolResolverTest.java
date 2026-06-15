@@ -4,6 +4,7 @@ import com.wish.model.DiagnosticContext;
 import com.wish.models.report.IncidentReportStore;
 import com.wish.prompt.DiagnosticPrompts;
 import com.wish.tools.IncidentClassificationTool;
+import com.wish.tools.IncidentLastOccurredTool;
 import com.wish.tools.IncidentReportTool;
 import com.wish.tools.RootCauseClassificationTool;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,7 @@ class StageToolResolverTest {
         List<Object> tools = StageToolResolver.resolveTools(Stage.COLLECT, context, List.of());
 
         assertTrue(tools.stream().anyMatch(RootCauseClassificationTool.class::isInstance));
+        assertTrue(tools.stream().anyMatch(IncidentLastOccurredTool.class::isInstance));
     }
 
     @Test

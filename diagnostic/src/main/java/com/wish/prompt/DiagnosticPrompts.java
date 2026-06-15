@@ -3,6 +3,10 @@ package com.wish.prompt;
 import com.wish.model.stage.Stage;
 import com.wish.model.state.State;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+
 /**
  * System and user prompts for the diagnostic investigation loop (router + per-stage agents).
  */
@@ -10,7 +14,37 @@ public final class DiagnosticPrompts {
 
     public static final String SUBMIT_STAGE_FINDING_TOOL = "submit_stage_finding";
     public static final String PERSIST_INCIDENT_REPORT_TOOL = "persist_incident_report";
+
+    /**
+     * Required incident-timing rules for agent-authored markdown in {@link #PERSIST_INCIDENT_REPORT_TOOL}.
+     * Woven into TERMINATE prompts and the persist hint.
+     */
+    public static final String INCIDENT_REPORT_TIME_RULES = """
+            Incident time (required in every report markdown):
+            - **Last occurrence, not first**: **Incident occurred** is when the problem **last** happened — the \
+            most recent failure or observation within the user's scope. Never use the earliest historical failure \
+            unless the user explicitly asked about first occurrence.
+            - **User scope first**: Limit to the time window in the user request (e.g. 最近两天 / last 2 days, \
+            resolved against Context — investigation time). Older failures go under **Historical context** only.
+            - Prefer the latest evidenced timestamp (most recent failed DAG run, latest log line, latest alert) \
+            over classify-time estimates.
+            - Record when the problem last happened — NOT when the investigation started.
+            - If timing within scope is uncertain, use a date range ending at the latest known point and state \
+            uncertainty explicitly.
+            - Never omit incident timing. Place under "## Incident timeline" or Metadata as **Incident occurred**.
+            """;
+
+    /**
+     * {@code markdown} param description for {@link com.wish.tools.IncidentReportTool}.
+     * Must be a compile-time constant (no {@code .trim()} etc.) for {@code @ToolParam}.
+     */
+    public static final String INCIDENT_REPORT_MARKDOWN_PARAM_DESCRIPTION =
+            "Full incident report in markdown (summary, impact, recommended actions, incident timeline). "
+                    + INCIDENT_REPORT_TIME_RULES
+                    + " Leave blank to use a structured draft from collected findings.";
+
     public static final String CLASSIFY_INCIDENT_TOOL = "classify_incident";
+    public static final String RECORD_INCIDENT_LAST_OCCURRED_TOOL = "record_incident_last_occurred";
     public static final String CLASSIFY_ROOT_CAUSE_TOOL = "classify_root_cause";
 
     public static final String SESSION_SUMMARY_SYSTEM = """
@@ -33,16 +67,20 @@ public final class DiagnosticPrompts {
                     Instruction: Incident report persistence is enabled.
                     An incident report already exists at: %s
                     Before submit_stage_finding, call persist_incident_report with action=update and the full revised markdown report.
+
+                    %s
                     """
-                    .formatted(targetPath);
+                    .formatted(targetPath, INCIDENT_REPORT_TIME_RULES.trim());
         }
         return """
                 Instruction: Incident report persistence is enabled.
                 No incident report file exists yet for this session.
                 Before submit_stage_finding, call persist_incident_report with action=create and the full markdown report.
                 Target path: %s
+
+                %s
                 """
-                .formatted(targetPath);
+                .formatted(targetPath, INCIDENT_REPORT_TIME_RULES.trim());
     }
 
     private DiagnosticPrompts() {}
@@ -87,7 +125,15 @@ public final class DiagnosticPrompts {
      */
     public static String sharedInvestigationBackground(
             State state, String userRequest, String priorSessionBlock) {
+        return sharedInvestigationBackground(state, userRequest, priorSessionBlock, Instant.now());
+    }
+
+    public static String sharedInvestigationBackground(
+            State state, String userRequest, String priorSessionBlock, Instant investigationTime) {
         StringBuilder sb = new StringBuilder();
+        sb.append("Context — investigation time (UTC): ")
+                .append(formatInvestigationTime(investigationTime))
+                .append("\n\n");
         sb.append("Context — user request:\n");
         sb.append(userRequest == null || userRequest.isBlank() ? "(none)" : userRequest.trim());
         String prior = priorSessionBlock == null ? "" : priorSessionBlock.trim();
@@ -96,6 +142,11 @@ public final class DiagnosticPrompts {
         }
         sb.append("\n\nContext — structured progress:\n").append(state.desc());
         return sb.toString();
+    }
+
+    static String formatInvestigationTime(Instant investigationTime) {
+        Instant instant = investigationTime == null ? Instant.now() : investigationTime;
+        return DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(instant.atOffset(ZoneOffset.UTC));
     }
 
     /** Route-phase prompt appended after {@link #sharedInvestigationBackground}. */

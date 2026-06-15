@@ -24,6 +24,16 @@ public class IncidentReportStore {
     private static final DateTimeFormatter FILE_STAMP =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
 
+    private final IncidentReportIndex reportIndex;
+
+    public IncidentReportStore() {
+        this(new IncidentReportIndex());
+    }
+
+    IncidentReportStore(IncidentReportIndex reportIndex) {
+        this.reportIndex = reportIndex;
+    }
+
     public boolean reportExists(String sessionId, String rawRequest) {
         return Files.isRegularFile(resolveReportPath(sessionId, rawRequest));
     }
@@ -55,7 +65,7 @@ public class IncidentReportStore {
             IncidentReportPaths.ensureDirectory(path.getParent());
             boolean exists = Files.isRegularFile(path);
             if ("update".equals(normalizedAction)) {
-                Files.writeString(path, content, StandardCharsets.UTF_8);
+                writeReportAndIndex(context, path, content);
                 log.info("Incident report {}: {}", exists ? "updated" : "created", path);
                 return exists
                         ? "Updated incident report at " + path
@@ -67,7 +77,7 @@ public class IncidentReportStore {
                             + path
                             + ". Call persist_incident_report with action=update to revise it.";
                 }
-                Files.writeString(path, content, StandardCharsets.UTF_8);
+                writeReportAndIndex(context, path, content);
                 log.info("Incident report created: {}", path);
                 return "Created incident report at " + path;
             }
@@ -78,6 +88,11 @@ public class IncidentReportStore {
             log.warn("Failed to persist incident report at {}: {}", path, e.getMessage());
             return "Failed to persist incident report: " + e.getMessage();
         }
+    }
+
+    private void writeReportAndIndex(DiagnosticContext context, Path path, String content) throws IOException {
+        Files.writeString(path, content, StandardCharsets.UTF_8);
+        reportIndex.upsert(IncidentReportIndexEntry.from(context, path, Instant.now()));
     }
 
     /** Marks a multi-turn session as closed under its reports directory. */

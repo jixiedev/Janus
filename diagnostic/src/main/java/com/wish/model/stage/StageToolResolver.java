@@ -2,6 +2,7 @@ package com.wish.model.stage;
 
 import com.wish.model.DiagnosticContext;
 import com.wish.tools.IncidentClassificationTool;
+import com.wish.tools.IncidentLastOccurredTool;
 import com.wish.tools.IncidentReportTool;
 import com.wish.tools.RootCauseClassificationTool;
 
@@ -28,6 +29,7 @@ public final class StageToolResolver {
         }
         if (stage.allowsRootCauseClassification()) {
             tools.add(new RootCauseClassificationTool(context.currentState));
+            tools.add(new IncidentLastOccurredTool(context.currentState));
         }
         if (stage == Stage.TERMINATE && context.isReportingEnabled()) {
             tools.add(new IncidentReportTool(context, context.getReportStore()));

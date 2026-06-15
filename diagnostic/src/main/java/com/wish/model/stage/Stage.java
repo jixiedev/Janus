@@ -38,10 +38,14 @@ public enum Stage {
                     Rules:
                     - Do not assign categories such as infrastructure fault, misconfiguration, or vendor blame; \
                     those belong in later ANALYZE / VALIDATE stages after evidence.
-                    - Read the user request and background.
+                    - Read the user request and background (including Context — investigation time).
                     - Choose exactly one problem type from the allowed enum.
+                    - For classify_incident.occurredAt: best estimate of when the problem **last** occurred. If the \
+                    user gives a relative window (e.g. 最近两天) with no exact time, use Context — investigation time \
+                    (UTC). Do not use log/DAG dates before COLLECT runs.
 
-                    Output: Call classify_incident with the enum name and a short rationale tied to reported symptoms. \
+                    Output: Call classify_incident with the enum name, a short rationale tied to reported symptoms, \
+                    and occurredAt (ISO-8601 **last-occurrence** estimate — not earliest historical failure). \
                     When classification is recorded, call submit_stage_finding summarizing the problem type only, \
                     then call terminate(status="success").
 
@@ -60,7 +64,10 @@ public enum Stage {
                     Instruction: Gather concrete evidence: timestamps, job IDs, error messages, affected tables/pipelines, \
                     and recent changes.
 
-                    Rules: Use available tools; do not invent data. \
+                    Rules: When the user specifies a time window (e.g. 最近两天), query DAG runs/logs within that window \
+                    first. Use the **latest** failed run timestamp in scope; call record_incident_last_occurred when \
+                    that time is known. Cite the latest failure time prominently in findings.
+                    Use available tools; do not invent data. \
                     If evidence suggests a likely root cause, call classify_root_cause (TENTATIVE or PROBABLE).
 
                     Output: Call submit_stage_finding with a concise evidence summary, \
@@ -112,9 +119,13 @@ public enum Stage {
                     Role: TERMINATE stage agent. The investigation is ending.
 
                     Instruction: Synthesize all prior stage findings into a final incident report: summary, impact, \
-                    and recommended actions.
+                    recommended actions, and incident timeline.
 
-                    Rules: Ensure classify_root_cause reflects the final best-supported root cause (update if needed).
+                    Rules:
+                    - Ensure classify_root_cause reflects the final best-supported root cause (update if needed).
+                    - """
+                    + com.wish.prompt.DiagnosticPrompts.INCIDENT_REPORT_TIME_RULES.trim()
+                    + """
 
                     Output: When persist_incident_report is available, call it (create or update) with the full markdown \
                     report before submit_stage_finding. Then call submit_stage_finding with a brief conclusion for the \

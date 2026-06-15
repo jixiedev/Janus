@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.lang3.tuple.Pair;
 
+import java.time.Instant;
 import java.util.LinkedList;
 import java.util.Optional;
 
@@ -34,6 +35,11 @@ public class State {
     @Setter
     private String incidentCategoryRationale = "";
 
+    /** When the incident last occurred; provisional from CLASSIFY, refined via record_incident_last_occurred. */
+    @Getter
+    @Setter
+    private Instant incidentOccurredAt;
+
     @Getter
     @Setter
     private IncidentRootCause rootCause;
@@ -53,8 +59,13 @@ public class State {
     }
 
     public void setIncidentClassification(IncidentCategory category, String rationale) {
+        setIncidentClassification(category, rationale, incidentOccurredAt);
+    }
+
+    public void setIncidentClassification(IncidentCategory category, String rationale, Instant occurredAt) {
         this.incidentCategory = category;
         this.incidentCategoryRationale = rationale == null ? "" : rationale.trim();
+        this.incidentOccurredAt = occurredAt;
     }
 
     public Optional<IncidentRootCause> getRootCauseOptional() {
@@ -106,6 +117,9 @@ public class State {
                     .append(")");
             if (incidentCategoryRationale != null && !incidentCategoryRationale.isBlank()) {
                 description.append("\n\tProblem summary: ").append(incidentCategoryRationale.trim());
+            }
+            if (incidentOccurredAt != null) {
+                description.append("\n\tIncident last occurred (classified): ").append(incidentOccurredAt);
             }
         }
         if (rootCause != null) {

@@ -16,6 +16,7 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -45,6 +46,10 @@ public class DiagnosticContext {
 
     @Getter
     private String rawRequest;
+
+    /** Frozen at {@link #bootstrapMainSession}; anchor for relative windows and provisional last-occurrence time. */
+    @Getter
+    private Instant investigationStartedAt;
 
     private final ChatMemory routeChatMemory;
     private final ChatMemory stageChatMemory;
@@ -104,6 +109,7 @@ public class DiagnosticContext {
      * @return number of bound session messages (excluding framing)
      */
     public int bootstrapMainSession(String systemPrompt, List<Message> sessionMessages, String rawRequest) {
+        this.investigationStartedAt = Instant.now();
         this.rawRequest = rawRequest == null ? "" : rawRequest.trim();
         List<Message> bound =
                 sessionMessages == null || sessionMessages.isEmpty() ? List.of() : List.copyOf(sessionMessages);
@@ -147,8 +153,9 @@ public class DiagnosticContext {
 
     /** Frozen at route/stage entry; identical for {@link #prepareRouteStageContext()} and {@link #beginStage()}. */
     public String formatSharedInvestigationBackground() {
+        Instant clock = investigationStartedAt != null ? investigationStartedAt : Instant.now();
         return DiagnosticPrompts.sharedInvestigationBackground(
-                currentState, rawRequest, formatPriorSessionBlock());
+                currentState, rawRequest, formatPriorSessionBlock(), clock);
     }
 
     public boolean isReportingEnabled() {

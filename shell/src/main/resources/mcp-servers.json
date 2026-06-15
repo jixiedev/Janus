@@ -24,6 +24,21 @@
         "--auth-token",
         "mcp_api_admin:airflow_mcp_admin@tahoe"
       ]
+    },
+    "airflow_legacy": {
+      "command": "/Users/jixie/.local/bin/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/jixie/sbox/airflow-mcp-server",
+        "airflow-mcp-server",
+        "--safe",
+        "--static-tools",
+        "--base-url",
+        "https://airflow.s.legacy.wish.site/api/v1",
+        "--auth-token",
+        "mcp_api_admin:airflow_mcp_admin@tahoe"
+      ]
     }
   }
 }
