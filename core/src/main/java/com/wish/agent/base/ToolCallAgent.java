@@ -182,8 +182,8 @@ public class ToolCallAgent extends ReactAgent {
     }
 
     /**
-     * Tool whose response is the canonical user-facing answer, when {@link #usesCreateChatCompletionContract()}.
-     * Used by session summarization only; not referenced from shell services.
+     * Registered direct-result tool for {@link com.wish.support.DirectToolResultResolver.AgentRun} and
+     * session {@link com.wish.models.session.PromptRunSummarizer} (via shell {@code ToolCallSession}).
      */
     public String directSessionResultTool() {
         return usesCreateChatCompletionContract() ? CREATE_CHAT_COMPLETION_TOOL_NAME : null;
@@ -203,15 +203,8 @@ public class ToolCallAgent extends ReactAgent {
     }
 
     @Override
-    protected String extractUserVisibleOutput(BaseUserContext userContext, List<String> stepResults) {
-        if (usesCreateChatCompletionContract()) {
-            String fromTool = AgentRunOutputResolver.findLastToolResponse(
-                    userContext.getPromptMessages(), CREATE_CHAT_COMPLETION_TOOL_NAME);
-            if (fromTool != null && !fromTool.isBlank()) {
-                return fromTool.trim();
-            }
-        }
-        return super.extractUserVisibleOutput(userContext, stepResults);
+    protected String directResultToolName() {
+        return directSessionResultTool();
     }
 
     /*
@@ -236,13 +229,13 @@ public class ToolCallAgent extends ReactAgent {
         context.setLastThinkResult(content != null ? content : "");
 
         String thought = context.getLastThinkResult();
-        log.info("{}'s thoughts: {}", name, thought);
+        log.debug("{}'s thoughts: {}", name, thought);
         if (thoughtLoggingEnabled && thought != null && !thought.isBlank()) {
             Shower.LLM_THINK.show(thought, name);
         }
-        log.info("{} selected {} tools to use", name, toolCalls.size());
+        log.debug("{} selected {} tools to use", name, toolCalls.size());
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
-            log.info("Tool prepared: {} args={}", toolCall.name(), toolCall.arguments());
+            log.debug("Tool prepared: {} args={}", toolCall.name(), toolCall.arguments());
             Shower.LLM_TOOL.show(formatToolCall(toolCall), name);
         }
 
@@ -284,7 +277,7 @@ public class ToolCallAgent extends ReactAgent {
                     : context.getLastThinkResult();
         }
 
-        Prompt prompt = ToolCallingPromptSupport.forToolExecution(context.getCurrentChatPrompt());
+        Prompt prompt = ToolCallingPromptSupport.prepareExecuteToolCallsPrompt(context.getCurrentChatPrompt());
         if (prompt != null && prompt.getOptions() instanceof ToolCallingChatOptions options) {
             log.debug("{} tool execution context keys: {}", name, options.getToolContext().keySet());
         }

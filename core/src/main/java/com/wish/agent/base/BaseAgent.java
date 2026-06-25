@@ -4,6 +4,8 @@ import com.wish.llm.LLMChatClient;
 import com.wish.models.AgentState;
 import com.wish.models.context.BaseUserContext;
 import com.wish.support.AgentRunOutputResolver;
+import com.wish.support.DirectToolResultResolver;
+import org.springframework.ai.chat.messages.Message;
 import com.wish.support.Shower;
 import org.springframework.ai.chat.memory.ChatMemory;
 import lombok.Getter;
@@ -163,8 +165,35 @@ public abstract class BaseAgent {
         nextStepPrompt = originalNextStepPrompt;
     }
 
-    /** Console/session user-visible text; subclasses may apply agent-specific tool contracts. */
+    /**
+     * Registered direct-result tool for {@link RunOutputResolver}; {@code null} skips tool lookup.
+     * {@link com.wish.agent.base.ToolCallAgent} delegates to {@link com.wish.agent.base.ToolCallAgent#directSessionResultTool()}.
+     */
+    protected String directResultToolName() {
+        return null;
+    }
+
+    /** Console/session user-visible text; subclasses may register a direct-result tool. */
     protected String extractUserVisibleOutput(BaseUserContext userContext, List<String> stepResults) {
-        return AgentRunOutputResolver.extractUserVisibleFromSteps(userContext, stepResults);
+        List<Message> messages = userContext == null ? List.of() : userContext.getPromptMessages();
+        return new RunOutputResolver(directResultToolName(), userContext, stepResults).extract(messages);
+    }
+
+    /** Agent-run fallback when the registered direct-result tool has no response. */
+    protected static final class RunOutputResolver extends DirectToolResultResolver {
+
+        private final BaseUserContext userContext;
+        private final List<String> stepResults;
+
+        RunOutputResolver(String registeredToolName, BaseUserContext userContext, List<String> stepResults) {
+            super(registeredToolName);
+            this.userContext = userContext;
+            this.stepResults = stepResults == null ? List.of() : stepResults;
+        }
+
+        @Override
+        protected String extractFallback(List<Message> messages) {
+            return AgentRunOutputResolver.extractUserVisibleFromSteps(userContext, stepResults);
+        }
     }
 }

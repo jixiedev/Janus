@@ -20,10 +20,11 @@ public final class ToolCallingPromptSupport {
     private ToolCallingPromptSupport() {}
 
     /**
-     * Returns a prompt suitable for {@link org.springframework.ai.model.tool.ToolCallingManager#executeToolCalls}.
-     * Rebuilds options so {@code toolContext} is always non-empty and {@code internalToolExecutionEnabled} is false.
+     * Rebuilds {@code source} for {@link org.springframework.ai.model.tool.ToolCallingManager#executeToolCalls}:
+     * non-empty {@code toolContext} (required by {@code DefaultToolCallingManager}) and
+     * {@code internalToolExecutionEnabled(false)} so Janus runs tools in {@code act}, not inside {@code call}.
      */
-    public static Prompt forToolExecution(Prompt source) {
+    public static Prompt prepareExecuteToolCallsPrompt(Prompt source) {
         if (source == null) {
             return null;
         }

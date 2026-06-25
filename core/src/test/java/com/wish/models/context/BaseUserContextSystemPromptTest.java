@@ -15,7 +15,7 @@ class BaseUserContextSystemPromptTest {
     void initializePromptPrefix_putsSystemFirst() {
         var chatMemory = MessageWindowChatMemory.builder().build();
         BaseUserContext context = new BaseUserContext("ctx-1", "sess-1", chatMemory);
-        context.bindSessionMessages(java.util.List.of());
+        context.setPriorTurnSummaries(java.util.List.of());
 
         context.initializePromptPrefix(AGENT_SYSTEM, "do work");
 

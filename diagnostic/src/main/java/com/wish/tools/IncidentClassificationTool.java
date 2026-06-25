@@ -1,7 +1,10 @@
 package com.wish.tools;
 
 import com.wish.model.incident.IncidentCategory;
+import com.wish.model.incident.IncidentOccurredAtParser;
 import com.wish.model.state.State;
+
+import java.time.Instant;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
@@ -36,11 +39,21 @@ public class IncidentClassificationTool {
                             description =
                                     "Brief rationale describing the reported problem/symptoms only — not root cause.",
                             required = true)
-                    String rationale) {
+                    String rationale,
+            @ToolParam(
+                            description =
+                                    "When the problem last occurred (ISO-8601 UTC instant, offset datetime, or date). "
+                                            + "Use the latest/most recent time implied by the user report. If the user says "
+                                            + "最近N天/last N days with no exact time, use Context — investigation time "
+                                            + "(UTC) as a provisional last-occurrence estimate — not the earliest failure "
+                                            + "in logs.",
+                            required = true)
+                    String occurredAt) {
         IncidentCategory resolved = IncidentCategory.require(category);
         String trimmedRationale = rationale == null ? "" : rationale.trim();
-        state.setIncidentClassification(resolved, trimmedRationale);
-        return "{category=%s, label=%s, rationale=%s}"
-                .formatted(resolved.name(), resolved.getLabel(), trimmedRationale);
+        Instant occurred = IncidentOccurredAtParser.parseRequired(occurredAt);
+        state.setIncidentClassification(resolved, trimmedRationale, occurred);
+        return "{category=%s, label=%s, rationale=%s, occurredAt=%s}"
+                .formatted(resolved.name(), resolved.getLabel(), trimmedRationale, occurred);
     }
 }

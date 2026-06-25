@@ -49,3 +49,6 @@
 1780387663545:plan request -p "帮我查询wish的成立过程，保存到文件中"
 1780474708185:diagnostic request -p "Airflow DAG DailyCnMongoDataSync 最近有失败的情况，帮我调查"
 1780476186642:diagnostic request -p "Airflow DAG DailyCnMongoDataSync 最近两天有失败的情况，帮我调查出根本原因"
+1780985186200:diagnostic request -p "DailyStatsByDayProductStats这个dag最近一次失败是什么原因" -s demo
+1780985505223:diagnostic request -p "为什么上游返回空数据" -s demo
+1781058875752:diagnostic request -p "查询DailyMerchMonthlyOrdersTahoe dag最近两天失败的原因"

@@ -16,7 +16,7 @@ public class StageFindingTool {
     public String submitStageFinding(
             @ToolParam(
                             description =
-                                    "Structured stage finding (plain text; same language as the incident report).",
+                                    "Structured stage finding (plain text; same language as the user request).",
                             required = true)
                     String finding) {
         return finding == null ? "" : finding.trim();

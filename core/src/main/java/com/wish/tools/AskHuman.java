@@ -1,5 +1,6 @@
 package com.wish.tools;
 
+import com.wish.support.Shower;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
@@ -16,8 +17,7 @@ public class AskHuman {
         if (console != null) {
             return console.readLine("Bot: %s%n%nYou: ".formatted(inquire), "").strip();
         }
-        System.out.printf("Bot: %s%n%nYou: ", inquire);
-        System.out.flush();
+        Shower.promptPartial("Bot: %s%n%nYou: ".formatted(inquire));
         try (Scanner scanner = new Scanner(System.in)) {
             if (scanner.hasNextLine()) {
                 return scanner.nextLine().strip();

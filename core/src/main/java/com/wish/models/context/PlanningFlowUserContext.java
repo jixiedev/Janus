@@ -11,14 +11,14 @@ public class PlanningFlowUserContext extends BaseFlowUserContext {
     private final String planId;
     private boolean planInitialized;
     private boolean planFinalized;
-    private BaseUserContext initializeContext;
-    private BaseUserContext finalizeContext;
+    private Context initializeContext;
+    private Context finalizeContext;
 
     public PlanningFlowUserContext(String conversation, ChatMemory chatMemory, String promptRequest) {
         super(conversation, chatMemory);
         this.planId = PromptCacheSupport.planIdFromRequest(null, promptRequest);
-        this.initializeContext = new BaseUserContext(planningMemoryKey("create"), chatMemory);
-        this.finalizeContext = new BaseUserContext(planningMemoryKey("finalize"), chatMemory);
+        this.initializeContext = new Context(planningMemoryKey("create"), chatMemory);
+        this.finalizeContext = new Context(planningMemoryKey("finalize"), chatMemory);
     }
 
     public static PlanningFlowUserContext forSession(
@@ -26,9 +26,9 @@ public class PlanningFlowUserContext extends BaseFlowUserContext {
         PlanningFlowUserContext context =
                 new PlanningFlowUserContext(conversation, sessionId, chatMemory, promptRequest);
         context.initializeContext =
-                new BaseUserContext(context.planningMemoryKey("create"), sessionId, chatMemory);
+                new Context(context.planningMemoryKey("create"), sessionId, chatMemory);
         context.finalizeContext =
-                new BaseUserContext(context.planningMemoryKey("finalize"), sessionId, chatMemory);
+                new Context(context.planningMemoryKey("finalize"), sessionId, chatMemory);
         return context;
     }
 

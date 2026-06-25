@@ -25,7 +25,7 @@ public class PlanningFlowSession extends Session<PlanningFlowUserContext> {
 
     @Override
     protected void initializeContext(PlanningFlowUserContext context, String request) {
-        bindSessionMessages(context.getInitializeContext());
+        attachPriorTurnSummaries(context.getInitializeContext());
     }
 
     @Override

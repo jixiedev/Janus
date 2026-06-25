@@ -28,14 +28,41 @@ public final class IncidentReportPaths {
         return root.toAbsolutePath().normalize();
     }
 
-    /** {@code ephemeral/} for single-turn runs; {@code sessions/{sessionId}/} for {@code -c}. */
-    public static Path resolveRunDirectory(String sessionId) {
+    /**
+     * One directory per session or ephemeral investigation; holds a single {@code incident-report.md}.
+     *
+     * <ul>
+     *   <li>Persistent session ({@code -c id}): {@code sessions/{sessionId}/}</li>
+     *   <li>Ephemeral: {@code ephemeral/{request-slug}/}</li>
+     * </ul>
+     */
+    public static Path resolveSessionDirectory(String sessionId, String rawRequest) {
         Path root = resolveRoot();
-        if (sessionId == null || sessionId.isBlank()) {
-            return root.resolve("ephemeral");
+        if (sessionId != null && !sessionId.isBlank()) {
+            return root.resolve("sessions").resolve(sanitizePathSegment(sessionId.trim()));
         }
-        String safe = sanitizePathSegment(sessionId.trim());
-        return root.resolve("sessions").resolve(safe);
+        return root.resolve("ephemeral").resolve(slugFromRequest(rawRequest));
+    }
+
+    /** @deprecated Use {@link #resolveSessionDirectory(String, String)} */
+    @Deprecated
+    public static Path resolveRunDirectory(String sessionId) {
+        return resolveSessionDirectory(sessionId, null);
+    }
+
+    static String slugFromRequest(String request) {
+        if (request == null || request.isBlank()) {
+            return "untitled";
+        }
+        String slug =
+                request.trim()
+                        .toLowerCase()
+                        .replaceAll("[^a-z0-9]+", "-")
+                        .replaceAll("(^-+)|(-+$)", "");
+        if (slug.isBlank()) {
+            return "untitled";
+        }
+        return slug.length() > 48 ? slug.substring(0, 48) : slug;
     }
 
     static String sanitizePathSegment(String value) {

@@ -145,13 +145,13 @@ Uses `bash` and `str_replace_editor`; the same `-c` keeps one bash session per c
 ## Example: diagnostic (incident investigation)
 
 ```text
-shell:> diagnostic request -p "Airflow DAG daily_sales failed at 3am — find root cause" -m sensenova -c incident-1
+shell:> diagnostic request -p "Airflow DAG daily_sales failed at 3am — find root cause" -m sensenova -s incident-1
 ```
 
-Multi-stage loop (COLLECT → ANALYZE → VALIDATE → TERMINATE); stages use configured MCP tools when available. Follow-up with the same `-c`:
+Multi-stage loop (COLLECT → ANALYZE → VALIDATE → TERMINATE); stages use configured MCP tools when available. Follow-up with the same `-s`:
 
 ```text
-shell:> diagnostic request -p "Were any downstream tables affected?" -m sensenova -c incident-1
+shell:> diagnostic request -p "Were any downstream tables affected?" -m sensenova -s incident-1
 ```
 
 ---

@@ -5,7 +5,6 @@ import com.wish.llm.LLMChatClient;
 import com.wish.model.stage.Stage;
 import com.wish.models.context.BaseUserContext;
 import com.wish.prompt.DiagnosticPrompts;
-import com.wish.support.AgentRunOutputResolver;
 import com.wish.tools.StageFindingTool;
 import com.wish.tools.TerminateTool;
 
@@ -30,7 +29,7 @@ public class StageToolCallAgent extends ToolCallAgent {
             - Conclusions
             - Open questions
 
-            Rules: Use the same language as the incident report.
+            Rules: Use the same language as the user request.
             """;
 
     private static final List<Object> STAGE_BUILTIN_TOOLS = List.of(new StageFindingTool(), new TerminateTool());
@@ -76,15 +75,6 @@ public class StageToolCallAgent extends ToolCallAgent {
     }
 
     @Override
-    protected String extractUserVisibleOutput(BaseUserContext userContext, List<String> stepResults) {
-        String fromTool = AgentRunOutputResolver.findLastToolResponse(
-                userContext.getPromptMessages(), DiagnosticPrompts.SUBMIT_STAGE_FINDING_TOOL);
-        if (fromTool != null && !fromTool.isBlank()) {
-            return fromTool.trim();
-        }
-        return super.extractUserVisibleOutput(userContext, stepResults);
-    }
-
     public String directSessionResultTool() {
         return DiagnosticPrompts.SUBMIT_STAGE_FINDING_TOOL;
     }
